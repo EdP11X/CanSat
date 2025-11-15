@@ -1,0 +1,6 @@
+/venv
+.env
+/frames
+/frames/
+/__pycache__
+/data

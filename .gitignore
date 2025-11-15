@@ -1,0 +1,98 @@
+###############################
+#         GLOBAL
+###############################
+.env
+.env.*
+!.env.example
+.phpactor.json
+.phpunit.result.cache
+npm-debug.log
+yarn-error.log
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# IDEs
+.idea/
+.vscode/
+.fleet/
+.zed/
+
+
+###############################
+#         PYTHON API
+###############################
+# Virtual env
+/api/venv/
+
+# Python cache
+/api/__pycache__/
+__pycache__/
+
+# Python env files
+/api/.env
+/api/.env.*
+
+# Data folders (pesadas)
+/api/data/*
+/api/frames/*
+
+# Si tienes entradas EXCEPCIONALES dentro de /api/data
+# que sí quieras trackear, ponlas así:
+!/api/data/wwf_ecoregions.geojson
+
+
+###############################
+#         FRONTEND (Laravel + JS)
+###############################
+# Node & build
+/frontend/node_modules/
+/frontend/public/build
+/frontend/public/hot
+/frontend/dist/
+/frontend/build/
+
+# Composer / Laravel
+/frontend/vendor/
+/frontend/storage/
+/frontend/storage/*.key
+/frontend/storage/pail
+/frontend/public/storage
+
+# ENV del frontend
+/frontend/.env
+/frontend/.env.*
+!/frontend/.env.example
+
+# Cachés del frontend
+/frontend/.phpunit.cache
+/frontend/.phpunit.result.cache
+/frontend/auth.json
+
+# Homestead
+/frontend/Homestead.json
+/frontend/Homestead.yaml
+
+
+###############################
+#         ROOT (misma carpeta del proyecto)
+###############################
+vendor/
+storage/
+public/storage/
+
+
+###############################
+#         ARCHIVOS GRANDES
+# (Ignorar automáticamente binarios pesados)
+###############################
+*.zip
+*.bin
+*.glb
+*.mp4
+*.jpg
+*.png
+*.jpeg
+*.gif
+*.svg
+*.ico
