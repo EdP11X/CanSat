@@ -55,21 +55,7 @@ class SensorDataController extends Controller
         }
     }
 
-    public function estadisticasPromedio(Request $request)
-    {
-        try {
-            $query = [];
-            if ($request->inicio && $request->fin) {
-                $query = ['inicio' => $request->inicio, 'fin' => $request->fin];
-            }
-
-            $response = Http::get($this->apiUrl . '/estadisticas', $query);
-            return $response->json();
-        } catch (\Exception $e) {
-            return back()->with('error', 'Error al obtener las estadísticas: ' . $e->getMessage());
-        }
-    }
-
+  
     public function obtenerEstadisticas(Request $request)
     {
         try {
@@ -217,10 +203,7 @@ class SensorDataController extends Controller
         }
     }
 
-    public function rango()
-    {
-        return view('sensores.rango');
-    }
+     
 
     /**
      * Devuelve los últimos N registros normalizados para el front “live”.
@@ -349,8 +332,8 @@ class SensorDataController extends Controller
                 #'gy'         => $d['gy'] ?? null,
                 #'gz'         => $d['gz'] ?? null,
                 'vx'         => $d['vx'] ?? null,
-                'vx'         => $d['vy'] ?? null,
-                'vx'         => $d['vz'] ?? null,
+                'vy'         => $d['vy'] ?? null,
+                'vz'         => $d['vz'] ?? null,
                 'pitch'         => $d['pitch'] ?? null,
                 'roll'         => $d['roll'] ?? null,
                 'yaw'         => $d['yaw'] ?? null,
@@ -384,23 +367,7 @@ class SensorDataController extends Controller
             ->header('Pragma', 'no-cache');
     }
 
-    public function ventana()
-    {
-        $windowMinutes = 60;
-        $limit = 10;
-
-        $resp = Http::get($this->apiUrl . '/ventana', [
-            'window_minutes' => $windowMinutes,
-            'limit' => $limit,
-        ]);
-
-        if (!$resp->successful()) {
-            abort(502, 'Error consultando la API de sensores');
-        }
-
-        return response()->json($resp->json());
-    }
-
+    
     public function riesgoBioma()
     {
         $params = request()->only(['window_minutes', 'min_samples', 'limit']);

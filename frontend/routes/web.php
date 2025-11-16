@@ -6,7 +6,6 @@ use App\Http\Controllers\FrameController;
 
 Route::get('/sensores', [SensorDataController::class, 'index'])->name('sensores.index');
 Route::get('/sensores/estadisticas', [SensorDataController::class, 'estadisticas'])->name('sensores.estadisticas');
-//Route::get('/sensores/rango', [SensorDataController::class, 'datosRango'])->name('sensores.rango');
 Route::get('/sensores/cargar-vista-estadisticas/{vista}', [SensorDataController::class, 'vistaEstadisticas'])->name('sensores.cargar-vista-estadisticas');
 Route::get('/sensores/cargar-vista-control/{vista}', [SensorDataController::class, 'vistaControl'])->name('sensores.cargar-vista-control');
 Route::get('/sensores/control', [SensorDataController::class, 'misionControl'])->name('sensores.control');
