@@ -2,14 +2,13 @@
     $streamUrl = config('services.cansat.video_stream_url');
 @endphp
 
-<section
-    class="mx-auto max-w-6xl rounded-xl border border-violet-700 bg-gray-800 shadow-lg"
+<div
+    class="mx-auto max-w-6xl overflow-hidden rounded-xl border border-violet-700 bg-gray-800 shadow-lg"
     data-cansat-video
-    data-stream-url="{{ $streamUrl }}"
-    aria-labelledby="cansat-video-title">
+    data-stream-url="{{ $streamUrl }}">
     <div class="flex flex-wrap items-center justify-between gap-3 border-b border-violet-700 bg-gray-900/60 px-4 py-3">
         <div>
-            <h3 id="cansat-video-title" class="flex items-center gap-2 font-semibold text-purple-200 space-font">
+            <h3 class="flex items-center gap-2 font-semibold text-purple-200 space-font">
                 <i class="fas fa-video text-violet-300" aria-hidden="true"></i>
                 Video en vivo del CanSat
             </h3>
@@ -19,7 +18,7 @@
         <div class="flex items-center gap-3">
             <span class="inline-flex items-center gap-2 text-sm text-purple-200" aria-live="polite">
                 <span data-video-indicator class="h-2.5 w-2.5 rounded-full bg-amber-400"></span>
-                <span data-video-status>Preparando reproductor…</span>
+                <span id="live-frame-status" data-video-status>Preparando reproductor…</span>
             </span>
             <button
                 type="button"
@@ -33,10 +32,13 @@
 
     <div class="relative flex min-h-56 items-center justify-center overflow-hidden rounded-b-xl bg-black sm:min-h-80">
         <img
+            id="live-frame-img"
             data-video-image
+            data-stream-src="{{ $streamUrl }}"
             class="hidden h-full max-h-[70vh] min-h-56 w-full object-contain sm:min-h-80"
             alt="Transmisión en vivo de la cámara del CanSat"
-            decoding="async">
+            decoding="async"
+            referrerpolicy="no-referrer">
         <p
             data-video-placeholder
             class="px-6 py-12 text-center text-sm text-purple-200/80"
@@ -44,7 +46,7 @@
             Conectando con la cámara…
         </p>
     </div>
-</section>
+</div>
 
 <script>
     (() => {
@@ -56,7 +58,7 @@
         const indicator = player.querySelector('[data-video-indicator]');
         const placeholder = player.querySelector('[data-video-placeholder]');
         const retryButton = player.querySelector('[data-video-retry]');
-        const streamUrl = player.dataset.streamUrl?.trim();
+        const streamUrl = player.querySelector('#live-frame-img').dataset.streamSrc?.trim();
         let retryTimer;
         let retryDelay = 1500;
 
@@ -76,24 +78,22 @@
                 return;
             }
 
-            let url;
             try {
-                url = new URL(streamUrl, window.location.href);
+                const url = new URL(streamUrl, window.location.href);
                 if (!['http:', 'https:'].includes(url.protocol)) {
                     throw new Error('La URL del stream debe usar HTTP o HTTPS.');
                 }
+
+                setStatus('Conectando…');
+                placeholder.textContent = 'Conectando con la cámara…';
+                image.classList.remove('hidden');
+                url.searchParams.set('_cansat_retry', String(Date.now()));
+                image.src = url.toString();
             } catch (error) {
                 console.error('URL de video del CanSat no válida:', error);
                 setStatus('URL de video no válida');
                 placeholder.textContent = 'Revisa CANSAT_VIDEO_STREAM_URL; debe ser una URL HTTP o HTTPS válida.';
-                return;
             }
-
-            setStatus('Conectando…');
-            placeholder.textContent = 'Conectando con la cámara…';
-            image.classList.remove('hidden');
-            url.searchParams.set('_cansat_retry', String(Date.now()));
-            image.src = url.toString();
         }
 
         image.addEventListener('load', () => {
