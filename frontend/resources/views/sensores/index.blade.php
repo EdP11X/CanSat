@@ -121,6 +121,10 @@
             </div>
         </div>
 
+        <div class="bg-gray-900 p-4">
+            @include('sensores.partials.live-video')
+        </div>
+
         {{-- 3) BIOMA / RIESGO --}}
 
 

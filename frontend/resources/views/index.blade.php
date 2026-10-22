@@ -17,6 +17,9 @@
     <div class="p-4 bg-gray-900">
         <div id="sensorChart" class="rounded-lg border border-blue-700" style="width: 100%; height: 500px;"></div>
     </div>
+    <div class="bg-gray-900 p-4">
+        @include('sensores.partials.live-video')
+    </div>
     <div class="p-4 bg-gray-900">
         @if(session('error'))
             <div class="bg-red-50 border-l-4 border-red-400 p-4 mb-4">

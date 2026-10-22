@@ -38,7 +38,9 @@ return [
             'api_url'    => env('SENSORES_API_URL', 'http://127.0.0.1:5000/api'),
             'base_files' => env('SENSORES_BASE_FILES', 'http://127.0.0.1:5000'),
     ],
-    
 
+    'cansat' => [
+        'video_stream_url' => env('CANSAT_VIDEO_STREAM_URL'),
+    ],
 
 ];
