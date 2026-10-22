@@ -1,52 +1,18 @@
-import os
 import subprocess
 import time
 import sys
-from dotenv import load_dotenv
 
-# Cargar variables de entorno desde .env (si existe)
-load_dotenv()
-
-# ================= CONFIGURACIÓN =================
-
-# URL del stream MJPEG de la ESP32-CAM
-# Ejemplo por defecto: "http://192.168.4.1:81/stream"
-ESP32_STREAM_URL = os.getenv("ESP32_STREAM_URL", "http://192.168.4.1:81/stream")
-
-# URL RTMP COMPLETA DE YOUTUBE (incluye la stream key)
-# Ejemplo:
-# "rtmp://a.rtmp.youtube.com/live2/abcd-efgh-1234-5678-xxxx"
-YOUTUBE_RTMP_URL = os.getenv("YOUTUBE_RTMP_URL")
-
-if not YOUTUBE_RTMP_URL:
-    print("[ERROR] Falta la variable de entorno YOUTUBE_RTMP_URL en tu .env o entorno.")
+# Intentar importar configuración privada
+try:
+    from config_privado import ESP32_STREAM_URL, YOUTUBE_RTMP_URL, FFMPEG_BIN
+except ImportError:
+    print("[ERROR] No se pudo importar config_privado.py.")
+    print("Crea un archivo config_privado.py con ESP32_STREAM_URL, YOUTUBE_RTMP_URL y FFMPEG_BIN.")
     sys.exit(1)
 
-# Nombre del ejecutable de ffmpeg.
-# Si lo tienes en el PATH, con "ffmpeg" basta.
-FFMPEG_BIN = os.getenv("FFMPEG_BIN", "ffmpeg")
-
-# Si True, el script reintenta automáticamente cuando ffmpeg se cae.
-AUTO_RETRY = os.getenv("AUTO_RETRY", "true").lower() == "true"
-
-# Tiempo entre reintentos (segundos)
-RETRY_DELAY = float(os.getenv("RETRY_DELAY", "5"))
-
-# ==================================================
-
-
-def mask_rtmp(rtmp_url: str) -> str:
-    """Enmascara la clave de la URL RTMP para no mostrarla completa en logs."""
-    if not rtmp_url:
-        return ""
-    if "/" in rtmp_url:
-        prefix, key = rtmp_url.rsplit("/", 1)
-        if len(key) > 6:
-            key_masked = key[:4] + "***" + key[-2:]
-        else:
-            key_masked = "***"
-        return f"{prefix}/{key_masked}"
-    return "***"
+# Si quieres poder desactivar el reintento automático
+AUTO_RETRY = True
+RETRY_DELAY = 5  # segundos
 
 
 def build_ffmpeg_cmd():
@@ -57,41 +23,41 @@ def build_ffmpeg_cmd():
     - Lo envía a YouTube por RTMP
     """
 
-    # === Ejemplo de overlay con drawtext (DESACTIVADO) ===
-    # Si algún día quieres añadir fecha/hora en el video, activas esto.
-    overlay_enabled = False
-
-    # OJO: ajusta fontfile según tu SO.
-    # Windows -> algo como: C\\:\\Windows\\Fonts\\arial.ttf
-    drawtext_filter = (
-        "drawtext="
-        "fontfile=/ruta/a/tu/fuente.ttf:"
-        "text='%{localtime\\:%Y-%m-%d %H\\\\:%M\\\\:%S}':"
-        "x=10:y=10:"
-        "fontsize=24:"
-        "fontcolor=white:"
-        "box=1:boxcolor=0x00000099"
-    )
-    # ====================================================
-
     cmd = [
         FFMPEG_BIN,
-        "-re",                    # Leer en "tiempo real"
-        "-i", ESP32_STREAM_URL,   # Entrada: MJPEG de la ESP32-CAM
 
-        # Codificación de video
+        # Menos buffer, más “tiempo real”
+        "-fflags", "nobuffer",
+        "-flags", "low_delay",
+        "-use_wallclock_as_timestamps", "1",
+        "-rtbufsize", "10M",
+
+        # OJO: sin -re para no frenarlo de más
+        "-i", ESP32_STREAM_URL,
+
+        # Audio dummy para que YouTube no se queje
+        "-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:sample_rate=44100",
+        "-shortest",
+
+        # VIDEO
         "-c:v", "libx264",
-        "-preset", "veryfast",
+        "-preset", "ultrafast",
         "-tune", "zerolatency",
         "-pix_fmt", "yuv420p",
-    ]
 
-    # Si quisieras recortar / escalar podrías meter aquí -vf más adelante
-    if overlay_enabled:
-        cmd += ["-vf", drawtext_filter]
+        # FPS de salida
+        "-vf", "fps=10",
 
-    # Formato de salida FLV para RTMP
-    cmd += [
+        # GOP cortito para live
+        "-g", "20",
+        "-keyint_min", "20",
+        "-x264-params", "scenecut=0:open_gop=0:min-keyint=20",
+
+        # AUDIO
+        "-c:a", "aac",
+        "-b:a", "128k",
+
+        # Salida a YouTube
         "-f", "flv",
         YOUTUBE_RTMP_URL,
     ]
@@ -106,7 +72,7 @@ def run_ffmpeg_once():
     """
     cmd = build_ffmpeg_cmd()
     print("\n[INFO] Lanzando ffmpeg con el comando:")
-    print("      " + " ".join(cmd[:-1]) + " rtmp://.../KEY_ENMASCARADA")
+    print("      " + " ".join(cmd))
     print()
 
     try:
@@ -137,24 +103,25 @@ def main():
     print("  Emisor ESP32-CAM -> YouTube (RTMP)")
     print("=========================================")
     print(f"[CONF] Stream ESP32-CAM : {ESP32_STREAM_URL}")
-    print(f"[CONF] RTMP YouTube     : {mask_rtmp(YOUTUBE_RTMP_URL)}")
+    print(f"[CONF] RTMP YouTube     : (oculto)")
     print(f"[CONF] ffmpeg bin       : {FFMPEG_BIN}")
-    print(f"[CONF] Auto retry       : {AUTO_RETRY} (cada {RETRY_DELAY} s)\n")
     print("Presiona Ctrl+C para salir.\n")
 
-    while True:
-        code = run_ffmpeg_once()
+    try:
+        while True:
+            code = run_ffmpeg_once()
 
-        # Si no queremos reintentar o el código fue 0, salimos
-        if not AUTO_RETRY or code == 0:
-            break
+            # Si no queremos reintentar, salimos
+            if not AUTO_RETRY:
+                print("[INFO] AUTO_RETRY = False, saliendo.")
+                break
 
-        print(f"[WARN] ffmpeg se detuvo (código {code}). Reintentando en {RETRY_DELAY} s...")
-        try:
+            # Con AUTO_RETRY True, SIEMPRE reintentamos, sin importar el código
+            print(f"[WARN] ffmpeg se detuvo (código {code}). Reintentando en {RETRY_DELAY} s...")
             time.sleep(RETRY_DELAY)
-        except KeyboardInterrupt:
-            print("\n[INFO] Cancelado por el usuario. Saliendo...")
-            break
+
+    except KeyboardInterrupt:
+        print("\n[MAIN] Cancelado por el usuario. Saliendo...")
 
 
 if __name__ == "__main__":

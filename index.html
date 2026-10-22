@@ -1,25 +1,38 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="es">
 <head>
     <meta charset="UTF-8">
+    <meta http-equiv="refresh" content="0; url=frontend/public/">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Document</title>
+    <title>CanSat - Redirigiendo</title>
+    <style>
+        body {
+            margin: 0;
+            min-height: 100vh;
+            display: grid;
+            place-items: center;
+            background: #07111f;
+            color: #e6f0ff;
+            font-family: Arial, sans-serif;
+        }
+        .box {
+            text-align: center;
+            padding: 2rem 3rem;
+            border: 1px solid rgba(255,255,255,0.15);
+            border-radius: 14px;
+            background: rgba(255,255,255,0.02);
+        }
+        a {
+            color: #7cc7ff;
+            text-decoration: none;
+        }
+    </style>
 </head>
 <body>
-    <img src="http://172.31.10.63:8080/stream" alt="cam">
-
-    
-<h1> hola</h1>
-    <video  width="640" 
-        height="480"  controls autoplay >
-        <source src="http://172.31.10.63:8080/stream" type="video/mp4">
-    Tu navegador no soporta video.
-    </video>
-
-    <iframe src="http://172.31.10.63:8080/stream"
-        width="640" 
-        height="480" 
-        style="border:none;">
-</iframe>
+    <div class="box">
+        <h1>CanSat Ground Station</h1>
+        <p>Redirigiendo a la plataforma de monitoreo...</p>
+        <p><a href="frontend/public/">Entrar ahora</a></p>
+    </div>
 </body>
 </html>

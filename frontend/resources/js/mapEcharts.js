@@ -3,7 +3,9 @@ import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 
 const MX_BOUNDS = L.latLngBounds([[14.3, -118.8], [32.9, -86.4]]);
-let map, deviceMarker, accuracyCircle, trailPolyline;
+let map, deviceMarker = null, accuracyCircle = null, trailPolyline;
+let stationMarker = null, stationAccuracyCircle = null;
+let stationLocationStatus = null;
 
 let abLayer;
 let markerA = null, markerB = null, lineAB = null;
@@ -34,15 +36,37 @@ window.inicializarMapa = function () {
   }).addTo(map);
 
   trailPolyline  = L.polyline([], { weight: 3, opacity: 0.9 }).addTo(map);
-  deviceMarker   = L.marker([23.5, -102.0], { title: 'Dispositivo' }).addTo(map);
-  accuracyCircle = L.circle([23.5, -102.0], {
-    radius: 0,
-    stroke: false,
-    fillColor: '#3388ff',
-    fillOpacity: 0.15
-  }).addTo(map);
-
   abLayer = L.layerGroup().addTo(map);
+  stationLocationStatus = document.getElementById('map-location-status');
+
+  const StationLocationControl = L.Control.extend({
+    onAdd() {
+      const container = L.DomUtil.create('div', 'leaflet-bar');
+      const button = L.DomUtil.create('a', 'station-locate-control', container);
+      button.href = '#';
+      button.title = 'Marcar ubicación de la estación terrena';
+      button.setAttribute('role', 'button');
+      button.setAttribute('aria-label', button.title);
+      button.innerHTML = '<i class="fas fa-location-crosshairs" aria-hidden="true"></i>';
+      L.DomEvent.disableClickPropagation(container);
+      L.DomEvent.on(button, 'click', (event) => {
+        L.DomEvent.preventDefault(event);
+        locateStation();
+      });
+      return container;
+    }
+  });
+  new StationLocationControl({ position: 'topleft' }).addTo(map);
+
+  el.addEventListener('click', (event) => {
+    if (stationLocationStatus?.dataset.manualPlacement !== 'true') return;
+    if (event.target.closest('.leaflet-control')) return;
+    const bounds = el.getBoundingClientRect();
+    const point = L.point(event.clientX - bounds.left, event.clientY - bounds.top);
+    const location = map.containerPointToLatLng(point);
+    stationLocationStatus.dataset.manualPlacement = 'false';
+    markStationLocation(location.lat, location.lng, 0, 'marcada en el mapa');
+  }, true);
 
   setTimeout(() => map.invalidateSize(), 200);
 };
@@ -148,15 +172,108 @@ function refreshSelectionUI() {
 }
 
 function updateDevice({ lat, lon, acc = 0 }) {
-  if (!map) return;
-  const ll = L.latLng(lat, lon);
-  if (!MX_BOUNDS.contains(ll)) return;
-  deviceMarker.setLatLng(ll);
-  accuracyCircle.setLatLng(ll).setRadius(acc || 0);
+  if (!map) return false;
+  const latitude = Number(lat);
+  const longitude = Number(lon);
+  if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return false;
+  const ll = L.latLng(latitude, longitude);
+  if (!MX_BOUNDS.contains(ll)) return false;
+  if (!deviceMarker) {
+    deviceMarker = L.marker(ll, { title: 'CanSat: ubicación GPS' }).addTo(map);
+  } else {
+    deviceMarker.setLatLng(ll);
+  }
+  if (!accuracyCircle) {
+    accuracyCircle = L.circle(ll, {
+      radius: 0,
+      stroke: false,
+      fillColor: '#3388ff',
+      fillOpacity: 0.15
+    }).addTo(map);
+  } else {
+    accuracyCircle.setLatLng(ll);
+  }
+  accuracyCircle.setRadius(Number(acc) || 0);
   const pts = trailPolyline.getLatLngs();
   pts.push(ll); if (pts.length > 3000) pts.shift();
   trailPolyline.setLatLngs(pts);
   if (!map.getBounds().contains(ll)) map.panTo(ll);
+  return true;
+}
+
+function clearDeviceMarker() {
+  if (!map) return;
+  if (deviceMarker) map.removeLayer(deviceMarker);
+  if (accuracyCircle) map.removeLayer(accuracyCircle);
+  deviceMarker = null;
+  accuracyCircle = null;
+}
+
+function markStationLocation(lat, lon, accuracy = 0, source = 'ubicación del equipo') {
+  const latitude = Number(lat);
+  const longitude = Number(lon);
+  if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+    if (stationLocationStatus) stationLocationStatus.textContent = 'No se pudo obtener una coordenada válida.';
+    return false;
+  }
+  const location = L.latLng(latitude, longitude);
+  if (!MX_BOUNDS.contains(location)) {
+    if (stationLocationStatus) stationLocationStatus.textContent = 'La ubicación está fuera del mapa de México.';
+    return false;
+  }
+  if (stationLocationStatus) stationLocationStatus.dataset.manualPlacement = 'false';
+
+  if (!stationMarker) {
+    stationMarker = L.marker(location, {
+      title: 'Estación terrena (este equipo)',
+      icon: L.divIcon({
+        className: 'station-marker',
+        html: '<i class="fas fa-location-crosshairs" aria-hidden="true"></i>',
+        iconSize: [30, 30],
+        iconAnchor: [15, 15]
+      })
+    }).addTo(map);
+  } else {
+    stationMarker.setLatLng(location);
+  }
+  stationMarker.bindPopup(`<strong>Estación terrena</strong><br>${source}`);
+
+  if (!stationAccuracyCircle) {
+    stationAccuracyCircle = L.circle(location, {
+      radius: 0,
+      stroke: false,
+      fillColor: '#f97316',
+      fillOpacity: 0.14
+    }).addTo(map);
+  } else {
+    stationAccuracyCircle.setLatLng(location);
+  }
+  stationAccuracyCircle.setRadius(Number(accuracy) || 0);
+  map.setView(location, Math.max(map.getZoom(), 14));
+  if (stationLocationStatus) stationLocationStatus.textContent = 'Estación terrena marcada; no es el GPS del CanSat.';
+  return true;
+}
+
+function locateStation() {
+  if (!window.isSecureContext || !navigator.geolocation) {
+    if (stationLocationStatus) {
+      stationLocationStatus.dataset.manualPlacement = 'true';
+      stationLocationStatus.textContent = 'Haz clic en el mapa para marcar la estación; ubicación del navegador requiere localhost o HTTPS.';
+    }
+    return;
+  }
+
+  if (stationLocationStatus) stationLocationStatus.textContent = 'Solicitando ubicación de este equipo…';
+  navigator.geolocation.getCurrentPosition(
+    ({ coords }) => markStationLocation(coords.latitude, coords.longitude, coords.accuracy),
+    () => {
+      if (stationLocationStatus) {
+        stationLocationStatus.dataset.manualPlacement = 'true';
+        stationLocationStatus.textContent = 'Ubicación no autorizada; haz clic en el mapa para marcar la estación.';
+      }
+    },
+    { enableHighAccuracy: true, timeout: 10000, maximumAge: 30000 }
+  );
 }
 
 function renderTablaTelemetria(paquetes) {
@@ -208,6 +325,9 @@ function renderTablaTelemetria(paquetes) {
         <td class="px-3 py-2 whitespace-nowrap text-[11px] text-purple-200/80 font-mono">
           ${p.tsISO ?? '—'}
         </td>
+        <td class="px-3 py-2 text-right font-mono text-xs text-gray-200">
+          ${fmtNum(p.numero_paquete, 0)}
+        </td>
         <td class="px-3 py-2 text-right font-mono text-xs text-purple-100">
           ${fmtNum(p.lat, 5)}
         </td>
@@ -219,6 +339,21 @@ function renderTablaTelemetria(paquetes) {
         </td>
         <td class="px-3 py-2 text-right font-mono text-xs text-cyan-200">
           ${fmtHum(p.hum)}
+        </td>
+        <td class="px-3 py-2 text-right font-mono text-xs text-amber-200">
+          ${p.rssi == null ? '—' : `${fmtNum(p.rssi, 0)} dBm`}
+        </td>
+        <td class="px-3 py-2 text-right font-mono text-xs text-cyan-200">
+          ${p.snr == null ? '—' : `${fmtNum(p.snr, 2)} dB`}
+        </td>
+        <td class="px-3 py-2 text-right font-mono text-xs text-gray-200">
+          ${fmtNum(p.paquetes_recibidos, 0)}
+        </td>
+        <td class="px-3 py-2 text-right font-mono text-xs text-gray-200">
+          ${fmtNum(p.paquetes_perdidos, 0)}
+        </td>
+        <td class="px-3 py-2 text-right font-mono text-xs text-emerald-200">
+          ${p.recepcion_pct == null ? '—' : `${fmtNum(p.recepcion_pct, 2)} %`}
         </td>
       </tr>`;
   }).join('');
@@ -247,21 +382,27 @@ document.addEventListener('click', (e) => {
 window.setTelemetria = function (paquetes) {
   renderTablaTelemetria(paquetes);
   const st = document.getElementById(STATUS_ID);
-  if (st) st.textContent = `paquetes: ${paquetes.length}`;
-  if (paquetes.length) {
-    const u = paquetes[0];
-    if (u.lat != null && u.lon != null) {
-      updateDevice({ lat:u.lat, lon:u.lon, acc:u.hAcc ?? u.accuracy ?? 0 });
-    }
+  const latest = paquetes[0];
+  const hasGpsFix = latest && updateDevice({
+    lat: latest.lat,
+    lon: latest.lon,
+    acc: latest.hAcc ?? latest.accuracy ?? 0
+  });
+  if (!hasGpsFix) clearDeviceMarker();
+  if (st) {
+    const numero = latest?.numero_paquete;
+    st.textContent = `muestras: ${paquetes.length}${numero == null ? '' : ` · paquete: ${numero}`} · ${hasGpsFix ? 'GPS OK' : 'GPS sin fix'}`;
   }
+  window.dispatchEvent(new CustomEvent('cansat:telemetry', { detail: paquetes }));
 };
 
 /* ===== Polling ===== */
 (function setupPolling(){
-  const ENDPOINT = '/sensores/ultimos?page=1';
+  const ENDPOINT = '/sensores/ultimos?limit=200';
   const st = document.getElementById(STATUS_ID);
   const limpiar = document.getElementById(BTN_LIMPIAR_TABLA);
   const quitar  = document.getElementById(BTN_LIMPIAR_SEL);
+  let polling = false;
 
   if (limpiar) limpiar.addEventListener('click', () => {
     const tbody = document.getElementById(TBODY_ID);
@@ -278,6 +419,8 @@ window.setTelemetria = function (paquetes) {
   });
 
   async function tick() {
+    if (polling) return;
+    polling = true;
     try {
       const r = await fetch(ENDPOINT,{cache:'no-store'});
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
@@ -285,20 +428,41 @@ window.setTelemetria = function (paquetes) {
       const paquetes = (Array.isArray(data)?data:data.items||[]).map(d=>({
         id:d.id??d._id,
         tsISO:d.tsISO??d.timestamp??d.created_at,
-        lat:d.lat??d.latitude,
-        lon:d.lon??d.longitude,
-        temp:d.temp??d.temperature,
-        hum:d.hum??d.humidity,
-        hAcc:d.hAcc??d.accuracy
+        lat:d.lat??d.LT??d.LAT??d.latitude,
+        lon:d.lon??d.LN??d.LON??d.longitude,
+        temp:d.temp??d.temp_ext??d.temp_int??d.temperature,
+        hum:d.humedad??d.hum??d.humidity,
+        temp_ext:d.temp_ext??d.tempExterna??d.temp??d.temperature,
+        temp_int:d.temp_int??d.tempInterna,
+        humedad:d.humedad??d.hum??d.humidity,
+        presion:d.presion,
+        gas:d.gas??d.GAS,
+        co:d.co,
+        h2:d.h2,
+        ch4:d.ch4,
+        c2h:d.c2h,
+        no2:d.no2,
+        a_abs_ms2:d.a_abs_ms2,
+        altitud_m:d.altitud_m,
+        v_desc_ms:d.v_desc_ms,
+        hAcc:d.hAcc??d.accuracy,
+        numero_paquete:d.numero_paquete,
+        rssi:d.rssi,
+        snr:d.snr,
+        paquetes_recibidos:d.paquetes_recibidos,
+        paquetes_perdidos:d.paquetes_perdidos,
+        recepcion_pct:d.recepcion_pct
       }));
       window.setTelemetria(paquetes);
     } catch(e){
       if (st) st.textContent = 'sin conexión';
+    } finally {
+      polling = false;
     }
   }
 
   tick();
-  setInterval(tick,2000);
+  setInterval(tick,500);
 })();
 
 /* Estilos AB y z-index del mapa (adaptados a #map-main) */
@@ -313,6 +477,20 @@ window.setTelemetria = function (paquetes) {
     }
     #${TBODY_ID} tr:hover td {
       background: rgba(139,92,246,.08);
+    }
+    .station-locate-control {
+      width: 30px !important;
+      height: 30px !important;
+      line-height: 30px !important;
+      text-align: center;
+      color: #c2410c !important;
+      font-size: 16px;
+    }
+    .station-marker {
+      color: #c2410c;
+      font-size: 24px;
+      text-align: center;
+      text-shadow: 0 1px 3px #fff;
     }
     tr.fila-select > td {
       font-weight: 500;

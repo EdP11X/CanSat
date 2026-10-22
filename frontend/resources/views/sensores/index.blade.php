@@ -3,43 +3,40 @@
 @section('content')
     <div class="bg-purple-950 shadow-lg rounded-lg overflow-hidden border border-violet-500 glow-effect">
         <div class="nasa-gradient px-4 py-5 sm:px-6 border-b border-violet-700">
-            <div class="flex items-center justify-between">
-                <h2 class="text-xl font-semibold text-purple-300 space-font flex items-center">
-                    <i class="fas fa-satellite text-violet-200 mr-3"></i>
-                    Telemetría en Tiempo Real
-                </h2>
-                <div class="text-purple-400 space-font text-sm">
-                    <i class="fas fa-satellite-dish mr-2"></i>
-                    <span>Panel en vivo</span>
+            <div class="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                <div>
+                    <p class="text-xs uppercase tracking-[0.28em] text-violet-200/80 mb-2">CanSat · telemetry</p>
+                    <h2 class="text-xl font-semibold text-purple-300 space-font flex items-center">
+                        <i class="fas fa-satellite text-violet-200 mr-3"></i>
+                        Telemetría en Tiempo Real
+                    </h2>
+                </div>
+                <div class="flex items-center gap-3 text-purple-300 space-font text-sm">
+                    <span class="inline-flex items-center gap-2 rounded-full border border-emerald-400/40 bg-emerald-500/10 px-3 py-1.5">
+                        <span class="h-2.5 w-2.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                        Panel en vivo
+                    </span>
                 </div>
             </div>
         </div>
 
-        {{-- 1) IMAGEN EN TIEMPO REAL --}}
         <div class="p-4 bg-gray-900">
             <div class="mx-auto max-w-6xl">
-                <div class="rounded-lg border border-violet-700 bg-gray-800 overflow-hidden">
-                    <div class="px-4 py-3 border-b border-violet-700 flex items-center justify-between">
-                        <h3 class="text-purple-300 space-font font-semibold flex items-center">
-                            <i class="fas fa-camera mr-2 text-violet-200"></i> Imagen en tiempo real
-                        </h3>
-                        <span id="live-frame-status" class="text-xs text-purple-400">—</span>
-                    </div>
-
-                    <div class="grid md:grid-cols-3 gap-0">
-                        {{-- Imagen (ocupa 2 columnas) --}}
-                        <div class="md:col-span-3 bg-black flex items-center justify-center">
-                            <img id="live-frame-img" class="max-h-[420px] w-full object-contain select-none"
-                                src="http://172.31.7.140:8080/stream" {{-- imagen por defecto --}}
-                                data-stream-src="http://172.31.7.140:8080/stream" {{-- URL del stream --}}
-                                data-placeholder="http://172.31.7.140:8080/stream" {{-- fallback --}} alt="cam">
+                <div class="grid gap-4 md:grid-cols-3">
+                    <div class="rounded-xl border border-violet-700/70 bg-gray-800/80 p-4">
+                        <div class="text-[10px] uppercase tracking-[0.22em] text-purple-300/70">Estado</div>
+                        <div class="mt-3 flex items-center gap-3">
+                            <span class="inline-flex h-3 w-3 rounded-full bg-emerald-400 shadow-[0_0_18px_rgba(52,211,153,0.8)]"></span>
+                            <span class="text-lg font-semibold text-purple-100">Sistema activo</span>
                         </div>
-
-
-
-
-                        {{-- Datos a la derecha --}}
-
+                    </div>
+                    <div class="rounded-xl border border-violet-700/70 bg-gray-800/80 p-4">
+                        <div class="text-[10px] uppercase tracking-[0.22em] text-purple-300/70">Frecuencia</div>
+                        <div class="mt-3 text-2xl font-semibold text-purple-100 font-mono">3s</div>
+                    </div>
+                    <div class="rounded-xl border border-violet-700/70 bg-gray-800/80 p-4">
+                        <div class="text-[10px] uppercase tracking-[0.22em] text-purple-300/70">Último dato</div>
+                        <div id="status-last-update" class="mt-3 text-lg font-semibold text-purple-100 font-mono">—</div>
                     </div>
                 </div>
             </div>
@@ -101,11 +98,19 @@
                                 <i class="fas fa-bolt text-violet-300 text-xl"></i>
                                 <div>
                                     <div class="text-xs uppercase tracking-wider text-purple-400 space-font">
-                                        Aceleración
+                                        Aceleración dinámica
                                     </div>
                                     <div class="text-2xl font-semibold text-purple-100 font-mono">
                                         <span id="metric-aabs">—</span>
                                         <span class="text-sm opacity-80">m/s²</span>
+                                    </div>
+                                    <div class="mt-2 flex flex-wrap items-center gap-2">
+                                        <button id="btn-calibrar-aceleracion" type="button"
+                                            class="inline-flex items-center gap-1.5 rounded border border-amber-400/50 px-2 py-1 text-xs text-amber-200 hover:bg-amber-500/10 disabled:opacity-50">
+                                            <i class="fas fa-crosshairs" aria-hidden="true"></i>
+                                            calibrar en reposo
+                                        </button>
+                                        <span id="accel-calibration-status" class="text-[10px] text-purple-300/70" aria-live="polite"></span>
                                     </div>
                                 </div>
                             </div>
@@ -131,23 +136,29 @@
                                 Mapa en tiempo real
                             </h3>
                             <p class="text-xs text-purple-200/60">Trayectoria y últimos paquetes</p>
+                            <p id="map-location-status" class="text-xs text-amber-200/80">Estación terrena sin marcar · GPS CanSat sin fix</p>
                         </div>
 
                         <div id="map-main" class="w-full h-[360px] rounded-b-lg border-b border-violet-700/40"></div>
 
                         {{-- CONTENEDOR DE TABLA: alto fijo + scroll interno --}}
                         <div class="border-t border-violet-700/70">
-                            <div class="h-40 lg:h-72 overflow-y-auto morado-scroll">
-                                <table class="min-w-full text-xs tabla-morado table-fixed">
+                            <div class="h-40 lg:h-72 overflow-auto morado-scroll">
+                                <table class="min-w-[1050px] w-full text-xs tabla-morado table-fixed">
                                     <thead
                                         class="sticky top-0 bg-gray-900/90 border-b border-violet-700/70 text-purple-200 z-10">
                                         <tr>
-                                            <th class="text-left px-3 py-2 font-medium uppercase tracking-wider">fecha/hora
-                                            </th>
+                                            <th class="text-left px-3 py-2 font-medium uppercase tracking-wider">fecha/hora</th>
+                                            <th class="text-right px-3 py-2 font-medium uppercase tracking-wider">paquete</th>
                                             <th class="text-right px-3 py-2 font-medium uppercase tracking-wider">lat</th>
                                             <th class="text-right px-3 py-2 font-medium uppercase tracking-wider">lon</th>
                                             <th class="text-right px-3 py-2 font-medium uppercase tracking-wider">temp</th>
                                             <th class="text-right px-3 py-2 font-medium uppercase tracking-wider">hum</th>
+                                            <th class="text-right px-3 py-2 font-medium uppercase tracking-wider">RSSI</th>
+                                            <th class="text-right px-3 py-2 font-medium uppercase tracking-wider">SNR</th>
+                                            <th class="text-right px-3 py-2 font-medium uppercase tracking-wider">recibidos</th>
+                                            <th class="text-right px-3 py-2 font-medium uppercase tracking-wider">perdidos</th>
+                                            <th class="text-right px-3 py-2 font-medium uppercase tracking-wider">recepción</th>
                                         </tr>
                                     </thead>
                                     <tbody id="map-telemetry-body" class="divide-y divide-violet-800/30 text-gray-200">
@@ -333,17 +344,17 @@
                 </div>
 
                 <div class="rounded-lg border border-violet-700 bg-gray-800 p-3 chart-card">
-                    <h3 class="text-sm text-purple-300 mb-2">Aceleración Absoluta (m/s²)</h3>
+                    <h3 class="text-sm text-purple-300 mb-2">Aceleración dinámica (m/s²)</h3>
                     <div id="chart-aabs" style="height:220px"></div>
                 </div>
 
-                
+
                 <div class="rounded-lg border border-violet-700 bg-gray-800 p-3 chart-card">
                     <h3 class="text-sm text-purple-300 mb-2">Altitud (m)</h3>
                     <div id="chart-alt" style="height:220px"></div>
                 </div>
 
-               
+
             </div>
         </div>
 
@@ -362,5 +373,4 @@
     @vite('resources/js/mapEcharts.js')
     @vite('resources/js/3DmodelEcharts.js')
     @vite('resources/js/modelo3d-feed.js')
-    @vite('resources/js/cam-stream-fallback.js')
 @endpush

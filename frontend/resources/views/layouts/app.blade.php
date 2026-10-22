@@ -4,6 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="csrf-token" content="{{ csrf_token() }}">
     <title>CanSat - Monitoreo de Sensores</title>
 
     <!-- Font Awesome -->
@@ -111,7 +112,7 @@
                             class="group w-12 h-12 flex items-center justify-center text-purple-300 hover:text-white focus:outline-none {{ request()->routeIs('sensores.index') ? 'text-purple-100' : '' }}">
                             <i class="fas fa-satellite-dish text-xl"></i>
                             <span
-                                class="absolute left-full ml-4 px-2 py-1 bg-gray-900 text-purple-300 text-s font-semibold rounded-md 
+                                class="absolute left-full ml-4 px-2 py-1 bg-gray-900 text-purple-300 text-s font-semibold rounded-md
              hidden group-hover:inline-block whitespace-nowrap border border-violet-700">
                                 Datos en Tiempo Real
                             </span>
@@ -121,7 +122,7 @@
                             class="group w-12 h-12 flex items-center justify-center text-purple-300 hover:text-white focus:outline-none {{ request()->routeIs('sensores.estadisticas') ? 'text-purple-100' : '' }}">
                             <i class="fas fa-chart-bar text-xl"></i>
                             <span
-                                class="absolute left-full ml-4 px-2 py-1 bg-gray-900 text-purple-300 text-s font-semibold rounded-md 
+                                class="absolute left-full ml-4 px-2 py-1 bg-gray-900 text-purple-300 text-s font-semibold rounded-md
              opacity-0 group-hover:opacity-100 transition-opacity duration-300 whitespace-nowrap border border-violet-700
              pointer-events-none">
                                 Estadísticas
@@ -133,7 +134,7 @@
                             class="group w-12 h-12 flex items-center justify-center text-purple-300 hover:text-white focus:outline-none">
                             <i class="fas fa-cog text-xl"></i>
                             <span
-                                class="absolute left-full ml-4 px-2 py-1 bg-gray-900 text-purple-300 text-s font-semibold rounded-md 
+                                class="absolute left-full ml-4 px-2 py-1 bg-gray-900 text-purple-300 text-s font-semibold rounded-md
              hidden group-hover:inline-block whitespace-nowrap border border-violet-700">
                                 Configuración
                             </span>
@@ -145,12 +146,12 @@
                             class="group w-12 h-12 flex items-center justify-center text-purple-300 hover:text-white focus:outline-none">
                             <i class="fas fa-rocket text-xl"></i>
                             <span
-                                class="absolute left-full ml-4 px-2 py-1 bg-gray-900 text-purple-300 text-s font-semibold rounded-md 
+                                class="absolute left-full ml-4 px-2 py-1 bg-gray-900 text-purple-300 text-s font-semibold rounded-md
              hidden group-hover:inline-block whitespace-nowrap border border-violet-700">
                                 Control de Misión
                             </span>
                         </a>
-                    
+
                     -->
                     </nav>
 
@@ -169,7 +170,7 @@
             <!-- Contenido principal (deja espacio cuando sidebar está abierto en desktop) -->
             <!-- empieza cerrado para evitar FOUC en móvil; JS lo abrirá en desktop -->
             <main id="mainContent" data-collapsed="1" class="transition-all duration-300 ease-out">
-              
+
                 <!-- Page Content -->
                 <div class="p-6 overflow-auto bg-indigo-950 min-h-[calc(100vh-4rem)]">
                     @yield('content')
@@ -258,7 +259,7 @@
 
 
 
-    
+
 </body>
 
 </html>

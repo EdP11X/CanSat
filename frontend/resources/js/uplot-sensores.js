@@ -53,12 +53,38 @@
       return out.slice(-MAX_POINTS);
     }
 
+    function updateLiveStatus(lastRow) {
+      const statusEl = document.getElementById('status-last-update');
+      if (!statusEl) return;
+
+      if (!lastRow || !lastRow.timestamp) {
+        statusEl.textContent = '—';
+        return;
+      }
+
+      const date = new Date(lastRow.timestamp);
+      statusEl.textContent = date.toLocaleTimeString([], {
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit'
+      });
+    }
+
     rows = normalizeRows(rows);
+    updateLiveStatus(rows.at(-1));
 
     function buildX(rs) {
       return rs.map((r) =>
         Math.floor(new Date(r.timestamp).getTime() / 1000)
       );
+    }
+
+    function isNumericValue(value) {
+      return value !== null && value !== undefined && value !== "" && Number.isFinite(Number(value));
+    }
+
+    function chartValues(list, key) {
+      return list.map((row) => isNumericValue(row[key]) ? Number(row[key]) : null);
     }
 
     let X = buildX(rows);
@@ -74,10 +100,10 @@
 
       const w = el.clientWidth || el.parentElement?.clientWidth || 320;
       const h = Math.max(200, el.clientHeight || 220);
+      const card = el.closest('.chart-card');
 
-      const Y = rows.length
-        ? rows.map((r) => Number(r[key]) || 0)
-        : [];
+      const Y = chartValues(rows, key);
+      if (card) card.hidden = !Y.some((value) => value !== null);
 
       const opts = {
         width: w,
@@ -116,7 +142,7 @@
       };
 
       const inst = new uPlot(opts, [X, Y], el);
-      charts.push({ inst, el, key });
+      charts.push({ inst, el, key, card });
     }
 
     // MISMOS CHARTS QUE TU ORIGINAL
@@ -129,10 +155,10 @@
     make("chart-h2",       "H2",                   "h2",         "#ff66cc"); // rosa
     make("chart-ch4",      "CH4",                  "ch4",        "#66cc33"); // verde
     make("chart-no2",      "NO2",                  "no2",        "#cc6600"); // (si lo agregas más adelante)
-    make("chart-c2h2",     "C2H2",                 "c2h2",       "#0099cc"); // (si lo agregas más adelante)
+    make("chart-c2h2",     "C2H2",                 "c2h",        "#0099cc");
 
     // nuevos
-    make("chart-aabs",     "A_abs (m/s²)",         "a_abs_ms2",  "#ffcc00");
+    make("chart-aabs",     "Aceleración dinámica (m/s²)", "a_abs_ms2", "#ffcc00");
     make("chart-vib-rms",  "Vib RMS (g)",          "vib_rms_g",  "#ff3399"); // (cuando exista)
     make("chart-alt",      "Altitud (m)",          "altitud_m",  "#66ff66");
     make("chart-vdesc",    "Vel. Descenso (m/s)",  "v_desc_ms",  "#ff4444"); // (cuando exista)
@@ -149,49 +175,16 @@
     });
     ro.observe(grid);
 
-    // ========================
-    // 4) POLLING EN VIVO
-    // ========================
-    async function poll() {
-      try {
-        // USA el controlador Laravel "ultimos" (ya normalizado)
-        const res = await fetch("/sensores/ultimos?limit=200", {
-          cache: "no-store",
-        });
-        if (!res.ok) throw new Error("HTTP " + res.status);
-        const data = await res.json();
+    window.addEventListener("cansat:telemetry", (event) => {
+      rows = normalizeRows(event.detail || []);
+      updateLiveStatus(rows.at(-1));
+      X = buildX(rows);
 
-        const list = Array.isArray(data) ? data : data.items || [];
-        if (!list.length) return;
-
-        // normalizar campos para que coincidan con los keys de arriba
-        const mapped = list.map((d) => ({
-          ...d,
-          timestamp: d.tsISO || d.timestamp || d.created_at || null,
-          humedad: d.humedad ?? d.hum ?? null,
-          presion: d.presion ?? null,
-          gas: d.gas ?? null,
-          // por si en algún momento usas otros nombres
-          temp_ext: d.temp_ext ?? d.tempExterna ?? d.temp ?? null,
-          temp_int: d.temp_int ?? d.tempInterna ?? null,
-        }));
-
-        rows = normalizeRows(mapped);
-        if (!rows.length) return;
-
-        X = buildX(rows);
-
-        charts.forEach(({ inst, key }) => {
-          const Y = rows.map((r) => Number(r[key]) || 0);
-          inst.setData([X, Y]);
-        });
-      } catch (e) {
-        console.warn("[uplot-sensores] error en polling:", e.message || e);
-      }
-    }
-
-    // Primer tick + intervalo
-    poll();
-    setInterval(poll, 3000); // cada 3 s
+      charts.forEach(({ inst, key, card }) => {
+        const values = chartValues(rows, key);
+        if (card) card.hidden = !values.some((value) => value !== null);
+        inst.setData([X, values]);
+      });
+    });
   }
 })();

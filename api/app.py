@@ -2,9 +2,11 @@
 from flask import Flask, request, jsonify, send_from_directory
 from flask_sqlalchemy import SQLAlchemy
 from datetime import datetime, timedelta
+import math
+import statistics
 import pytz
 from dotenv import load_dotenv
-from sqlalchemy import insert
+from sqlalchemy import insert, inspect
 
 from sqlalchemy import func, and_
 from flask_cors import CORS
@@ -41,6 +43,43 @@ def frames(filename):
     return send_from_directory(app.config['FRAMES_DIR'], filename)
 
 # ===== MODELOS =====
+ACCELERATION_BASELINE = None
+ACCELERATION_CALIBRATION = []
+ACCELERATION_CALIBRATION_WINDOW = 5
+ACCELERATION_STABILITY_THRESHOLD = 0.05
+ACCELERATION_BASELINE_SHIFT_THRESHOLD = 0.10
+
+
+def acceleration_deviation(ax, ay, az):
+    if ACCELERATION_BASELINE is None:
+        return None
+    return math.sqrt(sum((value - baseline) ** 2 for value, baseline in zip(
+        (ax, ay, az), ACCELERATION_BASELINE
+    )))
+
+
+def calibrate_acceleration(ax, ay, az):
+    global ACCELERATION_BASELINE
+    ACCELERATION_CALIBRATION.append((ax, ay, az))
+    if len(ACCELERATION_CALIBRATION) > ACCELERATION_CALIBRATION_WINDOW:
+        ACCELERATION_CALIBRATION.pop(0)
+    if len(ACCELERATION_CALIBRATION) < ACCELERATION_CALIBRATION_WINDOW:
+        return acceleration_deviation(ax, ay, az)
+
+    axis_samples = tuple(zip(*ACCELERATION_CALIBRATION))
+    if max(statistics.pstdev(axis) for axis in axis_samples) <= ACCELERATION_STABILITY_THRESHOLD:
+        candidate = tuple(statistics.fmean(axis) for axis in axis_samples)
+        baseline_shift = (
+            math.sqrt(sum((value - baseline) ** 2 for value, baseline in zip(candidate, ACCELERATION_BASELINE)))
+            if ACCELERATION_BASELINE is not None else math.inf
+        )
+        if baseline_shift > ACCELERATION_BASELINE_SHIFT_THRESHOLD:
+            ACCELERATION_BASELINE = candidate
+            persist_acceleration_baseline()
+
+    return acceleration_deviation(ax, ay, az)
+
+
 class SensorData(db.Model):
     __tablename__ = 'sensor_data'
     id  = db.Column(db.Integer, primary_key=True)
@@ -84,6 +123,14 @@ class SensorData(db.Model):
     lat = db.Column(db.Float, nullable=True)
     lon = db.Column(db.Float, nullable=True)
 
+    # --- enlace LoRa ---
+    numero_paquete = db.Column(db.BigInteger)
+    rssi = db.Column(db.Float)
+    snr = db.Column(db.Float)
+    paquetes_recibidos = db.Column(db.BigInteger)
+    paquetes_perdidos = db.Column(db.BigInteger)
+    recepcion_pct = db.Column(db.Float)
+
     # --- derivados ---
     a_abs_ms2  = db.Column(db.Float)  # m/s²
     #vib_x_g    = db.Column(db.Float)
@@ -110,7 +157,7 @@ class SensorData(db.Model):
         try:
             if self.ax is None or self.ay is None or self.az is None:
                 return None
-            return float((self.ax**2 + self.ay**2 + self.az**2) ** 0.5 * 9.80665)
+            return acceleration_deviation(self.ax, self.ay, self.az)
         except Exception:
             return None
 
@@ -152,6 +199,12 @@ class SensorData(db.Model):
             # geo/altitud/descenso
             'lat': self.lat, 'lon': self.lon,
             'altitud_m': self.altitud_m,
+            'numero_paquete': self.numero_paquete,
+            'rssi': self.rssi,
+            'snr': self.snr,
+            'paquetes_recibidos': self.paquetes_recibidos,
+            'paquetes_perdidos': self.paquetes_perdidos,
+            'recepcion_pct': self.recepcion_pct,
             #'v_desc_ms': self.v_desc_ms,
 
             'timestamp': self.timestamp.isoformat() if self.timestamp else None,
@@ -176,12 +229,68 @@ class ImageFrame(db.Model):
             'timestamp': self.timestamp.isoformat() if self.timestamp else None
         }
 
+
+class AccelerationCalibration(db.Model):
+    __tablename__ = 'acceleration_calibration'
+    id = db.Column(db.Integer, primary_key=True)
+    ax = db.Column(db.Float, nullable=False)
+    ay = db.Column(db.Float, nullable=False)
+    az = db.Column(db.Float, nullable=False)
+    timestamp = db.Column(db.DateTime, default=local_now, nullable=False)
+
+
+def persist_acceleration_baseline():
+    calibration = db.session.get(AccelerationCalibration, 1)
+    if calibration is None:
+        calibration = AccelerationCalibration(id=1)
+        db.session.add(calibration)
+    calibration.ax, calibration.ay, calibration.az = ACCELERATION_BASELINE
+    calibration.timestamp = local_now()
+    recent_rows = (SensorData.query
+                   .filter(SensorData.ax.isnot(None), SensorData.ay.isnot(None), SensorData.az.isnot(None))
+                   .order_by(SensorData.id.desc())
+                   .limit(ACCELERATION_CALIBRATION_WINDOW - 1)
+                   .all())
+    for row in recent_rows:
+        row.a_abs_ms2 = acceleration_deviation(row.ax, row.ay, row.az)
+    db.session.commit()
+
 with app.app_context():
     db.create_all()
+    existing_columns = {column['name'] for column in inspect(db.engine).get_columns('sensor_data')}
+    radio_columns = {
+        'numero_paquete': 'BIGINT',
+        'rssi': 'FLOAT',
+        'snr': 'FLOAT',
+        'paquetes_recibidos': 'BIGINT',
+        'paquetes_perdidos': 'BIGINT',
+        'recepcion_pct': 'FLOAT',
+    }
+    with db.engine.begin() as connection:
+        for column, sql_type in radio_columns.items():
+            if column not in existing_columns:
+                connection.exec_driver_sql(
+                    f'ALTER TABLE sensor_data ADD COLUMN {column} {sql_type} NULL'
+                )
+    recent_axes = (SensorData.query
+                   .with_entities(SensorData.ax, SensorData.ay, SensorData.az)
+                   .filter(SensorData.ax.isnot(None), SensorData.ay.isnot(None), SensorData.az.isnot(None))
+                   .order_by(SensorData.id.desc())
+                   .limit(100)
+                   .all())
+    saved_calibration = db.session.get(AccelerationCalibration, 1)
+    if saved_calibration:
+        ACCELERATION_BASELINE = (saved_calibration.ax, saved_calibration.ay, saved_calibration.az)
+    elif len(recent_axes) >= 20:
+        axis_samples = tuple(zip(*recent_axes))
+        if max(statistics.pstdev(axis) for axis in axis_samples) <= 0.25:
+            ACCELERATION_BASELINE = tuple(statistics.fmean(axis) for axis in axis_samples)
+            db.session.add(AccelerationCalibration(id=1, ax=ACCELERATION_BASELINE[0],
+                                                   ay=ACCELERATION_BASELINE[1], az=ACCELERATION_BASELINE[2]))
+            db.session.commit()
 
 # ===== ENDPOINTS =====
  
-
 # variable global
 LAST_SAMPLE = {}
 
@@ -192,18 +301,16 @@ def guardar_datos():
         payload = request.get_json(force=True) or {}
 
         # === MAPEOS QUE SOPORTA ESTA API ===
-        # Nuevos que mandaste: T, TI, A, CA, PI, RL, YW, LT, LN
-        # Viejos que ya usabas: TEMP, TEMPINTERNA, ALT, CONA, Pitch, Roll, Yaw, Lat, Lon
         mapping = {
             # temperaturas
             "T": "temp_ext",
             "TI": "temp_int",
-            
 
             # meteo / gases
             "H": "humedad",
             "P": "presion",
             "G": "gas",
+            "GAS": "gas",
 
             # gases extra
             "CO": "co",
@@ -211,10 +318,6 @@ def guardar_datos():
             "C2H": "c2h",
             "H2": "h2",
             "NO2": "no2",
-
-            # calidad de aire
-           
-         
 
             # IMU / movimiento
             "AX": "ax",
@@ -229,26 +332,65 @@ def guardar_datos():
             "RL": "roll",
             "YW": "yaw",
 
-           
-
             # geo
             "LT": "lat",
             "LN": "lon",
-        
+            "LAT": "lat",
+            "LON": "lon",
+
             # altura
-            "A": "altitud_m",     # tu JSON nuevo trae "A": 75.5
-             
+            "A": "altitud_m",
+
+            # enlace LoRa
+            "N": "numero_paquete",
+            "RSSI": "rssi",
+            "SNR": "snr",
+            "RECIBIDOS": "paquetes_recibidos",
+            "PERDIDOS": "paquetes_perdidos",
+            "RECEPCION": "recepcion_pct",
+
             # aceleración absoluta directa
             "AABS": "a_abs_ms2",
         }
 
         row = {}
+        integer_fields = {"numero_paquete", "paquetes_recibidos", "paquetes_perdidos"}
         for key_json, col_db in mapping.items():
             if key_json in payload and payload[key_json] is not None:
                 try:
-                    row[col_db] = float(payload[key_json])
+                    if col_db in integer_fields:
+                        row[col_db] = int(float(payload[key_json]))
+                    else:
+                        row[col_db] = float(payload[key_json])
                 except (TypeError, ValueError):
                     row[col_db] = None
+        #Parcheando ubicación porque no sirve el GPS
+            #Ubicación de cholula 19.05803237539983, -98.29876281180091
+            #lat = 19.058032
+            #lon = -98.298762
+        # === BLOQUE PARA MODIFICAR LAT/LON ANTES DE GUARDAR ===
+        lat = row.get("lat")
+        lon = row.get("lon")
+        if lat is not None and lon is not None:
+            try:
+                # Aquí metes tu lógica real de corrección
+                # === EJEMPLO: offset y redondeo ===
+                # lat += 0.0001
+                # lon -= 0.0002
+
+                # Si solo quieres redondear:
+                lat = round(lat, 6)
+                lon = round(lon, 6)
+            except (TypeError, ValueError):
+                pass
+            else:
+                row["lat"] = lat
+                row["lon"] = lon
+        # =====================================================
+        #Parcheando ubicación porque no sirve el GPS
+            #Ubicación de cholula 19.05803237539983, -98.29876281180091
+            #lat = 19.058032
+            #lon = -98.298762
 
         # si no vino a_abs_ms2 pero sí ax/ay/az, la calculamos
         if "a_abs_ms2" not in row:
@@ -256,7 +398,9 @@ def guardar_datos():
             ay = row.get("ay")
             az = row.get("az")
             if ax is not None and ay is not None and az is not None:
-                row["a_abs_ms2"] = ((ax**2 + ay**2 + az**2) ** 0.5) * 9.80665
+                row["a_abs_ms2"] = calibrate_acceleration(ax, ay, az)
+        elif row.get("ax") is not None and row.get("ay") is not None and row.get("az") is not None:
+            row["a_abs_ms2"] = calibrate_acceleration(row["ax"], row["ay"], row["az"])
 
         # timestamp siempre
         ts = local_now()
@@ -289,18 +433,69 @@ def guardar_datos():
             "c2h": row.get("c2h"),
             "h2": row.get("h2"),
             "no2": row.get("no2"),
-            
             # derivados / alt / gps
             "a_abs_ms2": row.get("a_abs_ms2"),
             "altitud_m": row.get("altitud_m"),
             "lat": row.get("lat"),
             "lon": row.get("lon"),
+            "numero_paquete": row.get("numero_paquete"),
+            "rssi": row.get("rssi"),
+            "snr": row.get("snr"),
+            "paquetes_recibidos": row.get("paquetes_recibidos"),
+            "paquetes_perdidos": row.get("paquetes_perdidos"),
+            "recepcion_pct": row.get("recepcion_pct"),
         }
 
         return jsonify({"ok": True, "id": new_id}), 201
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/calibrar-aceleracion', methods=['POST'])
+def calibrar_aceleracion():
+    global ACCELERATION_BASELINE, ACCELERATION_CALIBRATION
+    try:
+        recent_rows = (SensorData.query
+                       .filter(SensorData.ax.isnot(None), SensorData.ay.isnot(None), SensorData.az.isnot(None))
+                       .order_by(SensorData.id.desc())
+                       .limit(15)
+                       .all())
+        if len(recent_rows) < 15:
+            return jsonify({'error': 'Se necesitan al menos 15 muestras para calibrar.'}), 409
+
+        axis_samples = tuple(zip(*[(row.ax, row.ay, row.az) for row in recent_rows]))
+        deviations = tuple(statistics.pstdev(axis) for axis in axis_samples)
+        if max(deviations) > 0.25:
+            return jsonify({
+                'error': 'El CanSat no está estable. Déjalo quieto y vuelve a calibrar.',
+                'desviacion_por_eje': deviations,
+            }), 409
+
+        ACCELERATION_BASELINE = tuple(statistics.fmean(axis) for axis in axis_samples)
+        ACCELERATION_CALIBRATION.clear()
+
+        calibration = db.session.get(AccelerationCalibration, 1)
+        if calibration is None:
+            calibration = AccelerationCalibration(id=1)
+            db.session.add(calibration)
+        calibration.ax, calibration.ay, calibration.az = ACCELERATION_BASELINE
+        calibration.timestamp = local_now()
+
+        for row in recent_rows:
+            row.a_abs_ms2 = acceleration_deviation(row.ax, row.ay, row.az)
+
+        db.session.commit()
+        return jsonify({
+            'ok': True,
+            'muestras': len(recent_rows),
+            'referencia': dict(zip(('ax', 'ay', 'az'), ACCELERATION_BASELINE)),
+            'ruido_maximo_ms2': max(deviations),
+            'a_abs_ms2': recent_rows[0].a_abs_ms2,
+        })
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 500
 
 
 @app.route('/api/datos', methods=['GET'])
@@ -455,6 +650,12 @@ def datos_latest():
                 SensorData.altitud_m,
                 SensorData.lat,
                 SensorData.lon,
+                SensorData.numero_paquete,
+                SensorData.rssi,
+                SensorData.snr,
+                SensorData.paquetes_recibidos,
+                SensorData.paquetes_perdidos,
+                SensorData.recepcion_pct,
             )
             .order_by(SensorData.id.desc())
             .limit(limit)
@@ -487,6 +688,12 @@ def datos_latest():
                     "altitud_m": r.altitud_m,
                     "lat": r.lat,
                     "lon": r.lon,
+                    "numero_paquete": r.numero_paquete,
+                    "rssi": r.rssi,
+                    "snr": r.snr,
+                    "paquetes_recibidos": r.paquetes_recibidos,
+                    "paquetes_perdidos": r.paquetes_perdidos,
+                    "recepcion_pct": r.recepcion_pct,
                 }
             )
 

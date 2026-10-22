@@ -6,7 +6,7 @@ import time
 
 app = Flask(__name__)
 
-ESP_STREAM_URL = "http://192.168.4.50/stream"
+ESP_STREAM_URL = "http://192.168.5.50/stream"
 BOUNDARY = "123456789000000000000987654321"
 
 # Lista de colas (una por cliente conectado a /stream)
@@ -85,5 +85,5 @@ if __name__ == "__main__":
     t = threading.Thread(target=esp_reader, daemon=True)
     t.start()
 
-    print("Restream en: http://127.0.0.1:8080/stream")
-    app.run(host="0.0.0.0", port=8080, threaded=True)
+    print("Restream en: http://127.0.0.1:8081/stream")
+    app.run(host="0.0.0.0", port=8081, threaded=True)

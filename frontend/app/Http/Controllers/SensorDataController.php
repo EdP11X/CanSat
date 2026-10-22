@@ -55,7 +55,7 @@ class SensorDataController extends Controller
         }
     }
 
-  
+
     public function obtenerEstadisticas(Request $request)
     {
         try {
@@ -203,7 +203,7 @@ class SensorDataController extends Controller
         }
     }
 
-     
+
 
     /**
      * Devuelve los últimos N registros normalizados para el front “live”.
@@ -241,6 +241,12 @@ class SensorDataController extends Controller
                 'tsISO'    => $tsRaw,
                 'lat'      => $d['lat'] ?? null,
                 'lon'      => $d['lon'] ?? null,
+                'numero_paquete' => $d['numero_paquete'] ?? null,
+                'rssi'     => $d['rssi'] ?? null,
+                'snr'      => $d['snr'] ?? null,
+                'paquetes_recibidos' => $d['paquetes_recibidos'] ?? null,
+                'paquetes_perdidos' => $d['paquetes_perdidos'] ?? null,
+                'recepcion_pct' => $d['recepcion_pct'] ?? null,
 
                 'humedad'  => $d['humedad'] ?? null,
                 'presion'  => $d['presion'] ?? null,
@@ -270,6 +276,16 @@ class SensorDataController extends Controller
         usort($out, fn($a, $b) => strcmp($b['tsISO'] ?? '', $a['tsISO'] ?? ''));
 
         return response()->json($out);
+    }
+
+    public function calibrarAceleracion()
+    {
+        try {
+            $response = Http::timeout(8)->post($this->apiUrl . '/calibrar-aceleracion');
+            return response()->json($response->json() ?? [], $response->status());
+        } catch (\Throwable $e) {
+            return response()->json(['error' => 'No se pudo calibrar con la API de telemetría.'], 502);
+        }
     }
 
     /**
@@ -367,7 +383,7 @@ class SensorDataController extends Controller
             ->header('Pragma', 'no-cache');
     }
 
-    
+
     public function riesgoBioma()
     {
         $params = request()->only(['window_minutes', 'min_samples', 'limit']);

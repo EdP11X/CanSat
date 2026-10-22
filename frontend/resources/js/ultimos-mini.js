@@ -41,18 +41,6 @@ function renderTriplet(row) {
   if ($('ts-aabs'))  $('ts-aabs').textContent  = nice;
 }
 
-async function fetchLatest() {
-  try {
-    const res = await fetch('/sensores/ultimos?limit=1', { cache: 'no-store' });
-    if (!res.ok) return;
-    const json = await res.json();
-    const row = Array.isArray(json) ? json[0] : json?.items?.[0] || null;
-    renderTriplet(row);
-  } catch (e) {
-    // silencio; no rompas la UI si la API se cae un momento
-  }
-}
-
 (function initTriplet() {
   const root = document.getElementById('tripletMetrics');
   if (!root) return;
@@ -63,7 +51,33 @@ async function fetchLatest() {
     if (init) renderTriplet(JSON.parse(init));
   } catch {}
 
-  // 2) Polling suave cada 3s al endpoint live que ya tienes
-  fetchLatest();
-  setInterval(fetchLatest, 3000);
+  window.addEventListener('cansat:telemetry', (event) => {
+    renderTriplet(event.detail?.[0] ?? null);
+  });
+
+  const button = $('btn-calibrar-aceleracion');
+  const status = $('accel-calibration-status');
+  if (!button) return;
+
+  button.addEventListener('click', async () => {
+    button.disabled = true;
+    if (status) status.textContent = 'Comprobando reposo…';
+    try {
+      const response = await fetch('/sensores/calibrar-aceleracion', {
+        method: 'POST',
+        headers: {
+          Accept: 'application/json',
+          'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.content || '',
+        },
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || `HTTP ${response.status}`);
+      if (status) status.textContent = `Referencia guardada (${result.muestras} muestras)`;
+      renderTriplet({ a_abs_ms2: result.a_abs_ms2, timestamp: new Date().toISOString() });
+    } catch (error) {
+      if (status) status.textContent = error.message || 'No se pudo calibrar';
+    } finally {
+      button.disabled = false;
+    }
+  });
 })();

@@ -1,0 +1,5 @@
+RewriteEngine On
+
+# Redirect root access to the actual Laravel app
+RewriteRule ^$ frontend/public/ [L,R=302]
+RewriteRule ^(.*)$ frontend/public/$1 [L,QSA]

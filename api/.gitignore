@@ -1,6 +1,8 @@
 /venv
+/.venv
 .env
 /frames
 /frames/
 /__pycache__
 /data
+config_privado.py

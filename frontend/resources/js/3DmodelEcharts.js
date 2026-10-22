@@ -62,7 +62,7 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
     }
   }
 
-  function fitCameraToObject(obj, offset = 2.5) {
+  function fitCameraToObject(obj, offset = 1.9) {
     const box0 = new THREE.Box3().setFromObject(obj);
     const size0 = box0.getSize(new THREE.Vector3());
     const center0 = box0.getCenter(new THREE.Vector3());
@@ -74,7 +74,7 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
     let camDist = Math.abs((maxDim / 2) / Math.tan(fov / 2));
     camDist *= offset;
 
-    camera.position.set(0, maxDim * 0.1, camDist);
+    camera.position.set(camDist * 0.38, maxDim * 0.62, camDist * 0.9);
     camera.lookAt(0, 0, 0);
 
     controls.target.set(0, 0, 0);
@@ -83,6 +83,111 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
     controls.update();
 
     return maxDim;
+  }
+
+  function createCanSatInternals(bounds) {
+    const size = bounds.getSize(new THREE.Vector3());
+    const center = bounds.getCenter(new THREE.Vector3());
+    const radius = Math.min(size.x, size.z) * 0.37;
+    const boardRadius = radius * 0.9;
+    const boardThickness = size.y * 0.025;
+    const group = new THREE.Group();
+    const boardMaterial = new THREE.MeshStandardMaterial({ color: 0x27a968, emissive: 0x06351e, emissiveIntensity: 0.3, roughness: 0.62, metalness: 0.08 });
+    const goldMaterial = new THREE.MeshStandardMaterial({ color: 0xc69a39, metalness: 0.72, roughness: 0.28 });
+    const darkMaterial = new THREE.MeshStandardMaterial({ color: 0x17212b, metalness: 0.35, roughness: 0.38 });
+    const silverMaterial = new THREE.MeshStandardMaterial({ color: 0x9ba9b1, metalness: 0.78, roughness: 0.24 });
+    const whiteMaterial = new THREE.MeshStandardMaterial({ color: 0xe8edf0, metalness: 0.12, roughness: 0.35 });
+    const batteryMaterial = new THREE.MeshStandardMaterial({ color: 0x079fe8, emissive: 0x06334a, emissiveIntensity: 0.35, metalness: 0.42, roughness: 0.28 });
+    const lowerY = center.y - size.y * 0.08;
+    const upperY = center.y + size.y * 0.15;
+
+    function addBoard(y) {
+      const board = new THREE.Mesh(
+        new THREE.CylinderGeometry(boardRadius, boardRadius, boardThickness, 48),
+        boardMaterial
+      );
+      board.position.set(center.x, y, center.z);
+      board.castShadow = true;
+      board.receiveShadow = true;
+      group.add(board);
+    }
+
+    function addChip(x, y, z, width, height, depth, material) {
+      const chip = new THREE.Mesh(new THREE.BoxGeometry(width, height, depth), material);
+      chip.position.set(center.x + x, y, center.z + z);
+      chip.castShadow = true;
+      group.add(chip);
+    }
+
+    addBoard(lowerY);
+    addBoard(upperY);
+
+    const postRing = boardRadius * 0.78;
+    for (const xSign of [-1, 1]) {
+      for (const zSign of [-1, 1]) {
+        const post = new THREE.Mesh(
+          new THREE.CylinderGeometry(radius * 0.055, radius * 0.055, size.y * 0.63, 16),
+          goldMaterial
+        );
+        post.position.set(center.x + xSign * postRing, center.y, center.z + zSign * postRing);
+        post.castShadow = true;
+        group.add(post);
+
+        for (const y of [lowerY, upperY]) {
+          const fastener = new THREE.Mesh(
+            new THREE.CylinderGeometry(radius * 0.08, radius * 0.08, boardThickness * 1.8, 12),
+            silverMaterial
+          );
+          fastener.position.set(center.x + xSign * postRing, y, center.z + zSign * postRing);
+          group.add(fastener);
+        }
+      }
+    }
+
+    addChip(-boardRadius * 0.35, upperY + boardThickness, -boardRadius * 0.12, boardRadius * 0.55, boardThickness * 1.3, boardRadius * 0.42, darkMaterial);
+    addChip(boardRadius * 0.28, upperY + boardThickness * 1.2, boardRadius * 0.12, boardRadius * 0.3, boardThickness * 1.4, boardRadius * 0.24, silverMaterial);
+    addChip(-boardRadius * 0.24, lowerY + boardThickness, -boardRadius * 0.18, boardRadius * 0.46, boardThickness * 1.3, boardRadius * 0.36, darkMaterial);
+    addChip(boardRadius * 0.3, lowerY + boardThickness, boardRadius * 0.15, boardRadius * 0.34, boardThickness * 1.3, boardRadius * 0.25, darkMaterial);
+
+    const batteryY = center.y - size.y * 0.27;
+    const tray = new THREE.Mesh(
+      new THREE.BoxGeometry(boardRadius * 1.45, size.y * 0.1, boardRadius * 1.05),
+      darkMaterial
+    );
+    tray.position.set(center.x, center.y - size.y * 0.34, center.z);
+    tray.castShadow = true;
+    group.add(tray);
+
+    for (const zSign of [-1, 1]) {
+      const battery = new THREE.Mesh(
+        new THREE.CylinderGeometry(radius * 0.19, radius * 0.19, size.x * 0.7, 24),
+        batteryMaterial
+      );
+      battery.rotation.z = Math.PI / 2;
+      battery.position.set(center.x, batteryY, center.z + zSign * radius * 0.2);
+      battery.castShadow = true;
+      group.add(battery);
+    }
+
+    addChip(boardRadius * 0.47, upperY + boardThickness, -boardRadius * 0.27, boardRadius * 0.18, boardThickness * 2, boardRadius * 0.16, whiteMaterial);
+    addChip(-boardRadius * 0.45, lowerY + boardThickness, boardRadius * 0.3, boardRadius * 0.16, boardThickness * 2, boardRadius * 0.2, whiteMaterial);
+    return group;
+  }
+
+  function makeShellTranslucent(obj) {
+    obj.traverse((part) => {
+      if (!part.isMesh) return;
+      const materials = Array.isArray(part.material) ? part.material : [part.material];
+      const translucent = materials.map((material) => {
+        const copy = material.clone();
+        copy.transparent = true;
+        copy.opacity = 0.24;
+        copy.depthWrite = false;
+        copy.side = THREE.DoubleSide;
+        return copy;
+      });
+      part.material = Array.isArray(part.material) ? translucent : translucent[0];
+    });
   }
 
   function placeGroundUnderModel(obj, margin = 2.0) {
@@ -311,12 +416,17 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
           }
         });
 
+        const modelBounds = new THREE.Box3().setFromObject(model);
+        const internals = createCanSatInternals(modelBounds);
+        makeShellTranslucent(model);
+
         const prev = scene.getObjectByName('vehicle');
         if (prev) scene.remove(prev);
 
         vehicle = new THREE.Group();
         vehicle.name = 'vehicle';
         vehicle.add(model);
+        vehicle.add(internals);
         scene.add(vehicle);
 
         fitCameraToObject(vehicle);
