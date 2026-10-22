@@ -74,7 +74,7 @@
                                 @for($i = 1; $i <= $datos['total_paginas']; $i++)
                                     <li>
                                         <a href="{{ route('sensores.index', ['page' => $i]) }}"
-                                           class="px-4 py-2 text-sm {{ $i == $datos['pagina_actual'] ? 'bg-blue-600 text-blue-200' : 'bg-gray-800 text-blue-400 hover:bg-blue-900' }} rounded border border-blue-700 transition-colors duration-200">
+                                            class="px-4 py-2 text-sm {{ $i == $datos['pagina_actual'] ? 'bg-blue-600 text-blue-200' : 'bg-gray-800 text-blue-400 hover:bg-blue-900' }} rounded border border-blue-700 transition-colors duration-200">
                                             {{ $i }}
                                         </a>
                                     </li>
