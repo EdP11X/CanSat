@@ -46,4 +46,37 @@ class FrameController extends Controller
         return response()->json(['error' => $e->getMessage()], 503);
     }
 }
+
+    public function latestImage()
+    {
+        try {
+            $latest = Http::timeout(5)->get(rtrim($this->apiUrl, '/') . '/frames/latest');
+            if (!$latest->successful()) {
+                return response()->json(['error' => 'API upstream no disponible'], 503);
+            }
+
+            $path = $latest->json('url');
+            if (!is_string($path) || !preg_match('/^frames\/[A-Za-z0-9._-]+\.jpe?g$/i', $path)) {
+                return response()->json(['error' => 'No hay una imagen de radio disponible'], 404);
+            }
+
+            $baseFiles = rtrim(config('services.sensores.base_files'), '/');
+            if ($baseFiles === '') {
+                return response()->json(['error' => 'Origen de imágenes no configurado'], 503);
+            }
+
+            $image = Http::timeout(5)->get($baseFiles . '/' . $path);
+            if (!$image->successful()) {
+                return response()->json(['error' => 'No se pudo obtener la última imagen'], 503);
+            }
+
+            return response($image->body(), 200, [
+                'Content-Type' => 'image/jpeg',
+                'Cache-Control' => 'no-store, no-cache, must-revalidate',
+                'X-Content-Type-Options' => 'nosniff',
+            ]);
+        } catch (\Throwable $e) {
+            return response()->json(['error' => 'No se pudo obtener la última imagen.'], 503);
+        }
+    }
 }

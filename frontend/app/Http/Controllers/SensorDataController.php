@@ -288,6 +288,22 @@ class SensorDataController extends Controller
         }
     }
 
+    public function live()
+    {
+        try {
+            $response = Http::timeout(3)->get($this->apiUrl . '/live');
+            if (!$response->successful()) {
+                return response()->json(['error' => 'API de telemetría no disponible'], 502);
+            }
+
+            return response()->json($response->json() ?? [])
+                ->header('Cache-Control', 'no-store, no-cache, must-revalidate')
+                ->header('Pragma', 'no-cache');
+        } catch (\Throwable $e) {
+            return response()->json(['error' => 'No se pudo contactar la API de telemetría.'], 502);
+        }
+    }
+
     /**
      * Igual que ultimos(), pero devolvemos solo las filas con id > since_id
      * para “streaming” incremental.

@@ -10,7 +10,7 @@
     </div>
     
 
-    <div id="main" class="w-full h-[680px]"></div>
+    <div id="model3d-main" class="w-full h-[680px]"></div>
   </div>
 
   {{-- LADO DERECHO: KPIs + TABLA (más ancho) --}}
@@ -62,6 +62,20 @@
           <div class="text-[11px] text-gray-400">z° (yaw)</div>
           <div id="kpiYaw" class="text-purple-200 font-mono tabular-nums text-right whitespace-nowrap">—</div>
         </div>
+      </div>
+      <div class="mt-3 flex flex-wrap items-center gap-2">
+        <button type="button" data-orientation-calibrate
+          class="rounded border border-amber-400/50 px-3 py-1.5 text-xs text-amber-200 hover:bg-amber-500/10 disabled:opacity-50">
+          <i class="fas fa-crosshairs mr-1" aria-hidden="true"></i>
+          Calibrar orientación
+        </button>
+        <button type="button" data-orientation-reset
+          class="rounded border border-violet-500/50 px-3 py-1.5 text-xs text-violet-200 hover:bg-violet-700/30">
+          Restablecer
+        </button>
+        <span data-orientation-status class="text-xs text-purple-300/70" aria-live="polite">
+          Coloca el CanSat en la posición de referencia y calibra.
+        </span>
       </div>
 
       {{-- KPIs nuevos: temperatura y derivados --}}

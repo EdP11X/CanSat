@@ -1,15 +1,105 @@
 // resources/js/modelo3d-feed.js
 (() => {
-  const ENDPOINT = 'http://localhost:5000/api/live';
-  const POLL_MS = 80;
-  const DATA_IN_MS2 = false;
+  const ENDPOINT = '/sensores/live';
+  const POLL_MS = 500;
+  const DATA_IN_MS2 = true;
+  const CALIBRATION_KEY = 'cansat.orientation-calibration.v1';
 
   let started = false;
+  let polling = false;
   let pollHandle = null;
+  let latestRawAngles = null;
+  let calibrationActive = false;
+  let orientationCalibration = { roll: 0, pitch: 0, yaw: 0 };
 
   // ===== Utils =====
-  const toG = v => DATA_IN_MS2 ? (Number(v ?? 0) / 9.80665) : Number(v ?? 0);
+  const safeNum = value => value === null || value === undefined || value === ''
+    ? NaN
+    : Number.isFinite(Number(value)) ? Number(value) : NaN;
+  const toG = value => {
+    const number = safeNum(value);
+    return DATA_IN_MS2 && Number.isFinite(number) ? number / 9.80665 : number;
+  };
   const fmtNum = (v, decimals) => Number.isFinite(v) ? v.toFixed(decimals) : '—';
+  const wrapAngle = angle => ((angle + 180) % 360 + 360) % 360 - 180;
+
+  function readCalibration() {
+    try {
+      const saved = JSON.parse(localStorage.getItem(CALIBRATION_KEY) || 'null');
+      if (saved && ['roll', 'pitch', 'yaw'].every(axis => Number.isFinite(saved[axis]))) {
+        orientationCalibration = saved;
+        calibrationActive = true;
+      }
+    } catch (error) {
+      console.warn('[modelo3d] No se pudo leer la calibración guardada:', error);
+    }
+  }
+
+  function setCalibrationStatus(message) {
+    document.querySelectorAll('[data-orientation-status]').forEach(element => {
+      if (element.textContent !== message) element.textContent = message;
+    });
+  }
+
+  function updateCalibrationButtons() {
+    const hasAngles = latestRawAngles &&
+      ['roll', 'pitch', 'yaw'].every(axis => Number.isFinite(latestRawAngles[axis]));
+    document.querySelectorAll('[data-orientation-calibrate]').forEach(button => {
+      button.disabled = !hasAngles;
+    });
+    if (hasAngles && document.querySelector('[data-orientation-status]')) {
+      setCalibrationStatus(
+        calibrationActive
+          ? 'Calibración activa. Puedes volver a calibrar en cualquier momento.'
+          : 'Coloca el CanSat en la posición de referencia y calibra.'
+      );
+    }
+  }
+
+  function applyCalibration(sample) {
+    latestRawAngles = { roll: sample.roll, pitch: sample.pitch, yaw: sample.yaw };
+    updateCalibrationButtons();
+    return {
+      ...sample,
+      roll: Number.isFinite(sample.roll) ? wrapAngle(sample.roll - orientationCalibration.roll) : NaN,
+      pitch: Number.isFinite(sample.pitch) ? wrapAngle(sample.pitch - orientationCalibration.pitch) : NaN,
+      yaw: Number.isFinite(sample.yaw) ? wrapAngle(sample.yaw - orientationCalibration.yaw) : NaN,
+    };
+  }
+
+  document.addEventListener('click', event => {
+    const target = event.target;
+    if (!(target instanceof Element)) return;
+
+    if (target.closest('[data-orientation-calibrate]')) {
+      if (!latestRawAngles || !['roll', 'pitch', 'yaw'].every(axis => Number.isFinite(latestRawAngles[axis]))) {
+        setCalibrationStatus('Aún no hay ángulos válidos para calibrar.');
+        return;
+      }
+      orientationCalibration = { ...latestRawAngles };
+      calibrationActive = true;
+      try {
+        localStorage.setItem(CALIBRATION_KEY, JSON.stringify(orientationCalibration));
+      } catch (error) {
+        console.error('[modelo3d] No se pudo guardar la calibración en este navegador:', error);
+      }
+      setCalibrationStatus('Orientación calibrada con la posición actual.');
+      return;
+    }
+
+    if (target.closest('[data-orientation-reset]')) {
+      orientationCalibration = { roll: 0, pitch: 0, yaw: 0 };
+      calibrationActive = false;
+      try {
+        localStorage.removeItem(CALIBRATION_KEY);
+      } catch (error) {
+        console.error('[modelo3d] No se pudo borrar la calibración guardada:', error);
+      }
+      setCalibrationStatus('Calibración restablecida.');
+    }
+  });
+
+  readCalibration();
 
   function makeUIRefs() {
     const el = id => document.getElementById(id);
@@ -83,6 +173,7 @@
       else setBadge(badge, 'alta');
       return;
     }
+    if (![s.ax, s.ay, s.az].every(Number.isFinite)) return;
     const mag = Math.sqrt(s.ax*s.ax + s.ay*s.ay + s.az*s.az);
     vib.buf.push(mag);
     if (vib.buf.length > vib.N) vib.buf.shift();
@@ -94,15 +185,14 @@
     else setBadge(badge, 'alta');
   }
 
-  function safeNum(n) { const x = Number(n); return Number.isFinite(x) ? x : NaN; }
   function normalizeRow(d) {
     const ax_g = toG(d.ax);
     const ay_g = toG(d.ay);
     const az_g = toG(d.az);
 
-    const roll  = Number(d.roll ?? NaN);
-    const pitch = Number(d.pitch ?? NaN);
-    const yaw   = Number(d.yaw ?? NaN);
+    const roll  = safeNum(d.roll);
+    const pitch = safeNum(d.pitch);
+    const yaw   = safeNum(d.yaw);
 
     let idNum = safeNum(d.id);
     if (!Number.isFinite(idNum)) {
@@ -111,10 +201,10 @@
     }
     const ts = d.tsISO ? new Date(d.tsISO).toLocaleTimeString() : '—';
 
-    const tempExt = Number(d.temp_ext ?? NaN);
-    const tempInt = Number(d.temp_int ?? NaN);
-    const aabs    = Number(d.a_abs_ms2 ?? NaN);
-    const alt     = Number(d.altitud_m ?? NaN);
+    const tempExt = safeNum(d.temp_ext);
+    const tempInt = safeNum(d.temp_int);
+    const aabs    = safeNum(d.a_abs_ms2);
+    const alt     = safeNum(d.altitud_m);
 
     return {
       id: idNum,
@@ -125,9 +215,9 @@
       tempExt, tempInt,
       a_abs_ms2: aabs,
       alt,
-      vibRms: Number(d.vib_rms_g ?? NaN),
-      vibPeak: Number(d.vib_peak_g ?? NaN),
-      vdesc: Number(d.v_desc_ms ?? NaN)
+      vibRms: safeNum(d.vib_rms_g),
+      vibPeak: safeNum(d.vib_peak_g),
+      vdesc: safeNum(d.v_desc_ms)
     };
   }
 
@@ -137,14 +227,14 @@
     const data = await res.json();
     if (!data) return;
 
-    const s = normalizeRow(data);
+    const s = applyCalibration(normalizeRow(data));
     updateKPIs(refs, s);
     addRow(refs.tbody, s);
     pushAndEvalVibration(refs.badge, s);
 
     if (window.set3DOrientation &&
         Number.isFinite(s.roll) && Number.isFinite(s.pitch) && Number.isFinite(s.yaw)) {
-      try { window.set3DOrientation(s); } catch(e) {}
+      window.set3DOrientation(s);
     }
   }
 
@@ -152,44 +242,49 @@
     if (started) return;
 
     const refs = makeUIRefs();
-    // Si ni siquiera están los KPIs, no tiene caso
     if (!refs.kAx && !refs.kRoll && !refs.kAlt) return;
 
     started = true;
 
-    // Inicializa el modelo 3D si existe el contenedor
     if (document.getElementById('model3d-main') &&
         typeof window.inicializarModelo3D === 'function') {
-      try { window.inicializarModelo3D(); } catch (e) { console.warn(e); }
+      window.inicializarModelo3D();
     }
 
-    tick(refs).catch(e => console.error('[modelo3d] tick error:', e));
-    pollHandle = setInterval(
-      () => tick(refs).catch(e => console.error('[modelo3d] tick error:', e)),
-      POLL_MS
-    );
+    const poll = async () => {
+      if (!started || polling) return;
+      polling = true;
+      try {
+        await tick(makeUIRefs());
+      } catch (error) {
+        console.error('[modelo3d] tick error:', error);
+      } finally {
+        polling = false;
+        if (started) pollHandle = setTimeout(poll, POLL_MS);
+      }
+    };
+    poll();
   }
 
-  function stopFeed() {
-    if (pollHandle) { clearInterval(pollHandle); pollHandle = null; }
-    started = false;
-    vib.buf.length = 0;
-    try { window.__three3D?.destroy3D?.(); } catch {}
-  }
-
-  // Arrancar cuando cargue el DOM y esté el panel de IMU
-  document.addEventListener('DOMContentLoaded', () => {
+  function initializeVisiblePanel() {
     if (document.getElementById('kpiAx') || document.getElementById('kpiRoll')) {
       startFeed();
+      updateCalibrationButtons();
+      if (document.getElementById('model3d-main') &&
+          typeof window.inicializarModelo3D === 'function' &&
+          !window.__three3D?.renderer) {
+        window.inicializarModelo3D();
+      }
     }
-  });
+  }
 
-  // Por si cambias de pestaña / SPA, podrías parar aquí si quieres.
+  document.addEventListener('DOMContentLoaded', initializeVisiblePanel);
+  if (document.readyState !== 'loading') initializeVisiblePanel();
+
+  const panelObserver = new MutationObserver(initializeVisiblePanel);
+  panelObserver.observe(document.body, { childList: true, subtree: true });
+
   document.addEventListener('visibilitychange', () => {
-    if (document.hidden) {
-      // stopFeed();  // si quieres pausar al ocultar
-    } else {
-      if (!started) startFeed();
-    }
+    if (!document.hidden && !started) initializeVisiblePanel();
   });
 })();

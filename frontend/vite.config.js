@@ -21,11 +21,14 @@ export default defineConfig({
     plugins: [
         laravel({
             input: ['resources/css/app.css',
+                'resources/css/charts.css',
                 'resources/js/app.js',
-                'resources/js/echarts.js',
-                'resources/js/echarts-arduino.js',
                 'resources/js/uplot-sensores.js',
-                 'resources/js/mapEcharts.js'
+                'resources/js/mapEcharts.js',
+                'resources/js/3DmodelEcharts.js',
+                'resources/js/modelo3d-feed.js',
+                'resources/js/riesgo-bioma.js',
+                'resources/js/ultimos-mini.js'
             ],
             refresh: true,
         }),

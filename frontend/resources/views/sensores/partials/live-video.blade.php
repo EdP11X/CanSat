@@ -1,49 +1,43 @@
-@php
-    $streamUrl = config('services.cansat.video_stream_url');
-@endphp
-
 <div
     class="mx-auto max-w-6xl overflow-hidden rounded-xl border border-violet-700 bg-gray-800 shadow-lg"
     data-cansat-video
-    data-stream-url="{{ $streamUrl }}">
+    data-latest-url="{{ route('api.sensores.latest-frame') }}"
+    data-image-url="{{ route('api.sensores.latest-frame.image') }}">
     <div class="flex flex-wrap items-center justify-between gap-3 border-b border-violet-700 bg-gray-900/60 px-4 py-3">
         <div>
             <h3 class="flex items-center gap-2 font-semibold text-purple-200 space-font">
                 <i class="fas fa-video text-violet-300" aria-hidden="true"></i>
-                Video en vivo del CanSat
+                Imágenes en vivo por radio
             </h3>
-            <p class="mt-1 text-xs text-purple-200/60">Transmisión de cámara en tiempo real</p>
+            <p class="mt-1 text-xs text-purple-200/60">Última imagen recibida desde el CanSat mediante LoRa</p>
         </div>
 
         <div class="flex items-center gap-3">
             <span class="inline-flex items-center gap-2 text-sm text-purple-200" aria-live="polite">
                 <span data-video-indicator class="h-2.5 w-2.5 rounded-full bg-amber-400"></span>
-                <span id="live-frame-status" data-video-status>Preparando reproductor…</span>
+                <span data-video-status>Esperando la primera imagen…</span>
             </span>
             <button
                 type="button"
                 data-video-retry
                 class="rounded border border-violet-500/60 px-3 py-1.5 text-sm text-violet-200 transition hover:bg-violet-700/30 focus:outline-none focus:ring-2 focus:ring-violet-400">
                 <i class="fas fa-rotate-right mr-1" aria-hidden="true"></i>
-                Reconectar
+                Actualizar
             </button>
         </div>
     </div>
 
     <div class="relative flex min-h-56 items-center justify-center overflow-hidden rounded-b-xl bg-black sm:min-h-80">
         <img
-            id="live-frame-img"
             data-video-image
-            data-stream-src="{{ $streamUrl }}"
             class="hidden h-full max-h-[70vh] min-h-56 w-full object-contain sm:min-h-80"
-            alt="Transmisión en vivo de la cámara del CanSat"
-            decoding="async"
-            referrerpolicy="no-referrer">
+            alt="Última imagen recibida por radio desde la cámara del CanSat"
+            decoding="async">
         <p
             data-video-placeholder
             class="px-6 py-12 text-center text-sm text-purple-200/80"
             role="status">
-            Conectando con la cámara…
+            Esperando imágenes LoRa del receptor USB…
         </p>
     </div>
 </div>
@@ -58,9 +52,12 @@
         const indicator = player.querySelector('[data-video-indicator]');
         const placeholder = player.querySelector('[data-video-placeholder]');
         const retryButton = player.querySelector('[data-video-retry]');
-        const streamUrl = player.querySelector('#live-frame-img').dataset.streamSrc?.trim();
-        let retryTimer;
-        let retryDelay = 1500;
+        const latestUrl = player.dataset.latestUrl;
+        const imageUrl = player.dataset.imageUrl;
+        let timer;
+        let currentFrameId = null;
+        let polling = false;
+        let retryDelay = 1000;
 
         function setStatus(message, connected = false) {
             status.textContent = message;
@@ -69,47 +66,59 @@
             placeholder.classList.toggle('hidden', connected);
         }
 
-        function connect() {
-            clearTimeout(retryTimer);
-
-            if (!streamUrl) {
-                setStatus('Stream sin configurar');
-                placeholder.textContent = 'Asigna la URL MJPEG en CANSAT_VIDEO_STREAM_URL para habilitar la cámara.';
-                return;
-            }
+        async function pollLatestFrame() {
+            clearTimeout(timer);
+            if (polling) return;
+            polling = true;
 
             try {
-                const url = new URL(streamUrl, window.location.href);
-                if (!['http:', 'https:'].includes(url.protocol)) {
-                    throw new Error('La URL del stream debe usar HTTP o HTTPS.');
+                const response = await fetch(latestUrl, { cache: 'no-store' });
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                const frame = await response.json();
+
+                if (!frame.url || frame.id === null) {
+                    if (currentFrameId === null) {
+                        setStatus('Esperando la primera imagen…');
+                        placeholder.textContent = 'El receptor LoRa aún no ha enviado una imagen.';
+                    }
+                    retryDelay = 1000;
+                    return;
                 }
 
-                setStatus('Conectando…');
-                placeholder.textContent = 'Conectando con la cámara…';
-                image.classList.remove('hidden');
-                url.searchParams.set('_cansat_retry', String(Date.now()));
-                image.src = url.toString();
+                if (String(frame.id) !== String(currentFrameId)) {
+                    currentFrameId = frame.id;
+                    setStatus('Cargando imagen…');
+                    image.classList.remove('hidden');
+                    const separator = imageUrl.includes('?') ? '&' : '?';
+                    image.src = `${imageUrl}${separator}v=${encodeURIComponent(frame.id)}`;
+                } else if (image.complete && image.naturalWidth > 0) {
+                    setStatus('Recibiendo por radio', true);
+                }
+                retryDelay = 1000;
             } catch (error) {
-                console.error('URL de video del CanSat no válida:', error);
-                setStatus('URL de video no válida');
-                placeholder.textContent = 'Revisa CANSAT_VIDEO_STREAM_URL; debe ser una URL HTTP o HTTPS válida.';
+                console.error('No se pudo consultar la última imagen LoRa:', error);
+                if (currentFrameId === null) {
+                    setStatus('Receptor de imágenes sin conexión');
+                    placeholder.textContent = 'No se pudo consultar el servidor de imágenes. Reintentando…';
+                }
+                retryDelay = Math.min(retryDelay * 2, 10000);
+            } finally {
+                polling = false;
+                timer = setTimeout(pollLatestFrame, retryDelay);
             }
         }
 
         image.addEventListener('load', () => {
-            retryDelay = 1500;
-            setStatus('En vivo', true);
+            image.classList.remove('hidden');
+            setStatus('Recibiendo por radio', true);
         });
-
         image.addEventListener('error', () => {
-            setStatus('Sin señal · reconectando…');
-            placeholder.textContent = 'No se pudo recibir video. Se intentará reconectar automáticamente.';
+            currentFrameId = null;
             image.classList.add('hidden');
-            retryTimer = setTimeout(connect, retryDelay);
-            retryDelay = Math.min(retryDelay * 2, 15000);
+            setStatus('No se pudo cargar la imagen');
+            placeholder.textContent = 'Se intentará cargar de nuevo la última imagen recibida.';
         });
-
-        retryButton.addEventListener('click', connect);
-        connect();
+        retryButton.addEventListener('click', pollLatestFrame);
+        pollLatestFrame();
     })();
 </script>

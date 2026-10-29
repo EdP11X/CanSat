@@ -50,6 +50,26 @@ RE_SIMG = re.compile(
 )
 RE_EIMG = re.compile(r"^EIMG\s+id=(\d+)\s*$")
 RE_B64  = re.compile(r"^B64\s+(.+)$")
+RE_JPEG_BEGIN = re.compile(r"^JPEG_BEGIN,(\d+),(\d+)\s*$")
+MAX_JPEG_BYTES = 40000
+
+TELEMETRY_ALIASES = {
+    "ROLL": "RL",
+    "PITCH": "PI",
+    "YAW": "YW",
+    "LATITUDE": "LT",
+    "LONGITUDE": "LN",
+    "ALTITUD_M": "A",
+    "ALTITUDE_M": "A",
+    "ALT": "A",
+    "TEMP_EXT": "T",
+    "TEMP_INT": "TI",
+    "TEMPERATURE": "T",
+    "HUMEDAD": "H",
+    "HUMIDITY": "H",
+    "PRESION": "P",
+    "PRESSURE": "P",
+}
 
 
 # ===================== HELPERS JSON =====================
@@ -70,6 +90,36 @@ def extract_json_from_line(line: str):
         return json.loads(frag)
     except json.JSONDecodeError:
         return None
+
+
+def normalize_telemetry(payload: dict):
+    normalized = {}
+    for key, value in payload.items():
+        name = str(key).strip().upper()
+        normalized[TELEMETRY_ALIASES.get(name, name)] = value
+    return normalized
+
+
+def parse_telemetry_payload(line: str):
+    line = line.strip()
+    if line.startswith("[TEL]"):
+        line = line[5:].strip()
+
+    obj = extract_json_from_line(line)
+    if isinstance(obj, dict):
+        return normalize_telemetry(obj)
+
+    if line.startswith("CAN01"):
+        return normalize_telemetry(parse_can_frame(line))
+
+    fields = {}
+    for part in re.split(r"[,;]", line):
+        key, separator, value = part.strip().partition("=")
+        if not separator:
+            key, separator, value = part.strip().partition(":")
+        if separator and key.strip():
+            fields[key.strip()] = value.strip()
+    return normalize_telemetry(fields) if fields else None
 
 
 def available_serial_ports():
@@ -170,6 +220,28 @@ def enqueue_frame_job():
         print("[IMG] cola llena, se descarta frame")
 
 
+def enqueue_raw_frame(frame_id: int, raw: bytes):
+    if len(raw) < 4 or not raw.startswith(b"\xff\xd8") or not raw.endswith(b"\xff\xd9"):
+        print(f"[IMG] Foto {frame_id} inválida: no es un JPEG completo")
+        return
+
+    job = {
+        "id": frame_id,
+        "len": len(raw),
+        "crc": None,
+        "ok": True,
+        "raw": raw,
+        "lat": last_gps["lat"],
+        "lon": last_gps["lon"],
+    }
+
+    try:
+        frame_queue.put_nowait(job)
+        print(f"[IMG] Foto LoRa {frame_id} recibida ({len(raw)} bytes)")
+    except Full:
+        print("[IMG] cola llena, se descarta frame")
+
+
 # ===================== WORKER IMÁGENES (OTRO HILO) ======
 def frame_worker():
     """
@@ -188,12 +260,13 @@ def frame_worker():
             break
 
         try:
-            b64_all = job["b64"]
-            try:
-                raw = base64.b64decode(b64_all, validate=False)
-            except Exception as e:
-                print(f"[IMG] error al decodificar Base64: {e}")
-                continue
+            raw = job.get("raw")
+            if raw is None:
+                try:
+                    raw = base64.b64decode(job["b64"], validate=False)
+                except Exception as e:
+                    print(f"[IMG] error al decodificar Base64: {e}")
+                    continue
 
             if job["id"] is not None:
                 fname = f"frame_{job['id']:06d}.jpg"
@@ -207,7 +280,7 @@ def frame_worker():
             try:
                 with open(abs_path, "wb") as f:
                     f.write(raw)
-                print(f"📷 Guardado {rel_path} (bytes={len(raw)})")
+                print(f"[IMG] Guardado {rel_path} (bytes={len(raw)})")
                 if PRINT_DEBUG:
                     print(
                         f"      len_decl={job['len']} crc={job['crc']} "
@@ -294,7 +367,7 @@ def handle_line(session_telem: requests.Session, line: str):
     if line.startswith("CAN01"):
         if pending_telemetry:
             post_telemetry(session_telem, pending_telemetry)
-        pending_telemetry = parse_can_frame(line)
+        pending_telemetry = normalize_telemetry(parse_can_frame(line))
         return
 
     diagnostic = parse_receiver_diagnostic(line)
@@ -306,16 +379,31 @@ def handle_line(session_telem: requests.Session, line: str):
             pending_telemetry = None
         return
 
-    # Telemetría JSON: mantener compatibilidad con firmware anterior.
-    obj = extract_json_from_line(line)
-    if obj is None:
+    # El RX LoRa imprime [TEL] antes del payload recibido por radio.
+    # Se aceptan JSON, CAN01 y campos KEY=value separados por coma o punto y coma.
+    obj = parse_telemetry_payload(line)
+    if not obj:
         return
     post_telemetry(session_telem, obj)
 
 
+def read_exact(ser, size: int):
+    chunks = bytearray()
+    deadline = time.monotonic() + max(10.0, size * 10 / BAUD_RATE + 2.0)
+    while len(chunks) < size and time.monotonic() < deadline:
+        chunk = ser.read(min(4096, size - len(chunks)))
+        if chunk:
+            chunks.extend(chunk)
+    if len(chunks) != size:
+        raise serial.SerialException(
+            f"JPEG incompleto: recibidos {len(chunks)} de {size} bytes"
+        )
+    return bytes(chunks)
+
+
 # ===================== LOOP PRINCIPAL ===================
 def main():
-    print("Serial CAN01 -> API (+ imágenes a ./frames + /api/frames)")
+    print("Serial LoRa -> API (+ JPEG binario/Base64 a ./frames + /api/frames)")
     if SERIAL_PORT.lower() == "auto":
         print("[SER] Detectando automáticamente el puerto USB; define CANSAT_SERIAL_PORT para fijarlo.")
 
@@ -344,6 +432,16 @@ def main():
 
                             line = raw.decode("utf-8", errors="ignore").strip()
                             if line:
+                                image_match = RE_JPEG_BEGIN.match(line)
+                                if image_match:
+                                    frame_id = int(image_match.group(1))
+                                    image_size = int(image_match.group(2))
+                                    if image_size <= 0 or image_size > MAX_JPEG_BYTES:
+                                        raise serial.SerialException(
+                                            f"tamaño JPEG inválido: {image_size}"
+                                        )
+                                    enqueue_raw_frame(frame_id, read_exact(ser, image_size))
+                                    continue
                                 handle_line(session_telem, line)
                 except (serial.SerialException, OSError) as e:
                     print(f"[SER] {serial_port}: {e}; reintentando")

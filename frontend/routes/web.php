@@ -12,9 +12,12 @@ Route::get('/sensores/cargar-vista-control/{vista}', [SensorDataController::clas
 Route::get('/sensores/control', [SensorDataController::class, 'misionControl'])->name('sensores.control');
 
 Route::get('/api/sensores/latest-frame', [FrameController::class, 'latest'])->name('api.sensores.latest-frame');
+Route::get('/api/sensores/latest-frame/image', [FrameController::class, 'latestImage'])
+    ->name('api.sensores.latest-frame.image');
 
 Route::get('/sensores/ultimos', [SensorDataController::class, 'ultimos'])->name('sensores.ultimos');
 Route::get('/sensores/ultimos-stream', [SensorDataController::class, 'ultimosStream'])->name('sensores.ultimosStream');
+Route::get('/sensores/live', [SensorDataController::class, 'live'])->name('sensores.live');
 Route::get('/sensores/ventana', [SensorDataController::class, 'ventana']);
 Route::post('/sensores/calibrar-aceleracion', [SensorDataController::class, 'calibrarAceleracion'])
 	->name('sensores.calibrar-aceleracion');
